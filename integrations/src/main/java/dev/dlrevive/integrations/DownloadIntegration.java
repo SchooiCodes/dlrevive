@@ -88,10 +88,10 @@ public final class DownloadIntegration {
         return config;
     }
 
-    /** Resolver selection. The authenticated resolver is added in a later milestone. */
+    /** Resolver selection, driven by the persisted config. */
     private static StreamResolver createResolver(DownloadConfig config) {
         if (config.getAuthMode() == DownloadConfig.AuthMode.AUTHENTICATED) {
-            Log.w(TAG, "Authenticated mode is not available in this build; using anonymous");
+            return new InnertubeResolver(config);
         }
         return new NewPipeResolver(config.getPreferredExtension());
     }
