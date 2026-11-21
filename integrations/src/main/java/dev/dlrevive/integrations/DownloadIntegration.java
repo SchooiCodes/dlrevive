@@ -93,7 +93,7 @@ public final class DownloadIntegration {
         if (config.getAuthMode() == DownloadConfig.AuthMode.AUTHENTICATED) {
             Log.w(TAG, "Authenticated mode is not available in this build; using anonymous");
         }
-        return new UnavailableResolver();
+        return new NewPipeResolver(config.getPreferredExtension());
     }
 
     private static long enqueue(Context app, DownloadConfig config, ResolvedStream stream,
