@@ -4,18 +4,23 @@ Revive song downloads on a ReVanced-patched **YouTube Music** build, without a P
 
 ## Status
 
-Early development. Follow the [plan](docs/plan.md) for scope and milestones.
+Follow the [plan](docs/plan.md) for scope and milestones.
 
 | Milestone | Status |
 | --- | --- |
 | 1. Repo + research notes | Done |
-| 2. Gradle multi-module scaffold | Pending |
-| 3. Integrations entrypoint + config | Pending |
-| 4. Anonymous audio resolution | Pending |
-| 5. Authenticated audio resolution | Pending |
-| 6. ReVanced injection patch | Pending |
-| 7. On-device calibration + verification | Pending |
-| 8. Docs + final commit | Pending |
+| 2. Gradle multi-module scaffold | Done |
+| 3. Integrations entrypoint + config | Done |
+| 4. Anonymous audio resolution | Done |
+| 5. Authenticated audio resolution | Done |
+| 6. ReVanced injection patch | Built (not yet calibrated) |
+| 7. On-device calibration + verification | Blocked — needs target YTM APK |
+| 8. Docs + final commit | Done |
+
+The patch JAR builds and contains the bundled integrations DEX, but the fingerprint in
+`DownloadSongsPatch.kt` is intentionally broad. It **must** be calibrated against the exact
+YouTube Music APK you plan to patch — see the [calibration guide](docs/calibration.md). Until then,
+applying the patch will fail with a `PatchException` rather than silently doing nothing.
 
 ## Approach
 
@@ -47,6 +52,81 @@ as future work.
 - Android SDK build-tools (for `d8` dexing)
 - A specific YouTube Music APK to calibrate fingerprints against
 - An adb-connected device or emulator for verification
+
+## Build
+
+The wrapper downloads Gradle; set `JAVA_HOME` explicitly if your default `java` is a JRE.
+
+```powershell
+$env:JAVA_HOME = 'C:\Program Files\Java\jdk-17'
+$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+.\gradlew build
+.\gradlew :integrations:dexIntegrations
+.\gradlew :patches:jar
+```
+
+Outputs:
+
+- `integrations/build/dex/classes.dex` — bundled into the patch JAR as `dlrevive-classes.dex`
+- `patches/build/libs/dlvrevive-patches.jar` — the ReVanced patch
+
+`local.properties` (gitignored) must contain your SDK path:
+
+```properties
+sdk.dir=C:\\Users\\<you>\\AppData\\Local\\Android\\Sdk
+```
+
+## Apply
+
+Calibrate the fingerprint first ([guide](docs/calibration.md)), then apply with ReVanced CLI:
+
+```powershell
+java -jar revanced-cli.jar list-patches -p patches\build\libs\dlvrevive-patches.jar
+java -jar revanced-cli.jar patch -p patches\build\libs\dlvrevive-patches.jar `
+    -o youtube-music-revived.apk youtube-music.apk
+adb install -r youtube-music-revived.apk
+```
+
+Check your ReVanced CLI version's `--help` for exact flag names. The patched APK is signed
+differently from stock YouTube Music, so it cannot be installed over it — uninstall stock YTM
+first or use a rooted setup.
+
+## Configuration
+
+On first use the app writes `<external files dir>/dlrevive/config.json`. Edit it to change
+behaviour; malformed or missing files fall back to defaults.
+
+```json
+{
+  "authMode": "ANONYMOUS",
+  "cookieHeader": "",
+  "poToken": "",
+  "visitorData": "",
+  "preferredExtension": "m4a",
+  "downloadSubdirectory": "dlrevive",
+  "allowMobileData": true
+}
+```
+
+| Key | Meaning |
+| --- | --- |
+| `authMode` | `ANONYMOUS` uses NewPipeExtractor; `AUTHENTICATED` uses an Innertube client with your cookies/PO token and falls back to anonymous on failure. |
+| `cookieHeader` | Full `Cookie:` header value from a logged-in YouTube Music session. Keep this file private. |
+| `poToken` / `visitorData` | Optional PO token and visitor data required by some clients/tracks. |
+| `preferredExtension` | Preferred audio format: `m4a` or `opus` (the selector still picks the highest-bitrate usable stream). |
+| `downloadSubdirectory` | Folder under `Music/` where files are saved. |
+| `allowMobileData` | Whether `DownloadManager` may use metered connections. |
+
+## Limitations
+
+- Not calibrated yet: the current fingerprint is broad and will fail until narrowed for your APK.
+- Anonymous resolution depends on NewPipeExtractor, which breaks whenever YouTube changes its
+  clients. Update the dependency and recalibrate as needed.
+- Authenticated resolution skips `signatureCipher`-protected formats (solving YouTube's JS
+  challenge is out of scope here) and may need a newer Innertube client version.
+- No ffmpeg transcoding: files are saved in the stream's original audio container.
+- This does not restore YTM's own Premium-gated Download service; it fetches publicly accessible
+  audio streams directly.
 
 ## Disclaimer
 
