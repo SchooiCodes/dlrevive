@@ -1,0 +1,15 @@
+[versions]
+kotlin = "2.3.21"
+revancedPatcher = "19.2.1-dev.1"
+newpipeExtractor = "v0.27.1"
+gson = "2.13.2"
+junit = "4.13.2"
+
+[libraries]
+revanced-patcher = { module = "com.github.ReVanced:revanced-patcher", version.ref = "revancedPatcher" }
+newpipe-extractor = { module = "com.github.TeamNewPipe:NewPipeExtractor", version.ref = "newpipeExtractor" }
+gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
+junit = { module = "junit:junit", version.ref = "junit" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
