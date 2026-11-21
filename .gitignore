@@ -1,0 +1,49 @@
+# Gradle
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+.gradletasknamecache
+
+# Android / SDK
+local.properties
+*.apk
+*.ap_
+*.aab
+*.dex
+.cxx/
+captures/
+
+# Java / Kotlin
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+*.log
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local tooling / secrets
+*.jks
+*.keystore
+*.pem
+*.p12
+.secrets/
+cookies.txt
+config.local.json
+
+# ReVanced working files
+revanced-cache/
+*.rvp
