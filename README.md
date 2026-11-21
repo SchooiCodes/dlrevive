@@ -13,21 +13,25 @@ Follow the [plan](docs/plan.md) for scope and milestones.
 | 3. Integrations entrypoint + config | Done |
 | 4. Anonymous audio resolution | Done |
 | 5. Authenticated audio resolution | Done |
-| 6. ReVanced injection patch | Built (not yet calibrated) |
-| 7. On-device calibration + verification | Blocked — needs target YTM APK |
+| 6. ReVanced injection patch | Done |
+| 7. On-device calibration + verification | Static calibration done; device test pending |
 | 8. Docs + final commit | Done |
 
-The patch JAR builds and contains the bundled integrations DEX, but the fingerprint in
-`DownloadSongsPatch.kt` is intentionally broad. It **must** be calibrated against the exact
-YouTube Music APK you plan to patch — see the [calibration guide](docs/calibration.md). Until then,
-applying the patch will fail with a `PatchException` rather than silently doing nothing.
+The patch is calibrated for **YouTube Music 8.40.54**. Production YTM classes are obfuscated and no
+per-song download menu handler could be identified statically, so the patch hooks the share-intent
+builder `Lajgu;->a(...)` instead. **Sharing a song now also starts its download.** Rebuilding for
+a different YTM version requires recalibration — see the [calibration guide](docs/calibration.md).
 
 ## Approach
 
-A ReVanced patch injects a **Download** action into YouTube Music's song/player menu. The
-action calls a small Java "integrations" library that is bundled into the patched app. That
-library resolves the song to the best **audio-only** stream and hands it to Android's
-`DownloadManager`, which saves a playable file to the Music folder with a notification.
+A ReVanced patch hooks YouTube Music's **share** action. When you share a song, the patched app
+also calls a small Java "integrations" library that is bundled into the patched app. That library
+resolves the song to the best **audio-only** stream and hands it to Android's `DownloadManager`,
+which saves a playable file to the Music folder with a notification.
+
+This is a pragmatic deviation from a dedicated Download menu item: the per-song download handler
+is obfuscated in production YTM builds and could not be located reliably. See
+[calibration notes](docs/calibration.md).
 
 `yt-dlp` is used as the **reference specification** for the download flow and format
 selection (see [research notes](docs/research.md)). It is not bundled: a patched APK cannot

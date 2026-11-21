@@ -16,6 +16,8 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -33,6 +35,9 @@ public final class DownloadIntegration {
     private static final String USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 "
                     + "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36";
+
+    private static final Pattern VIDEO_ID_PATTERN = Pattern.compile(
+            "(?:v=|/v/|/embed/|/live/|youtu\\.be/)([A-Za-z0-9_-]{11})");
 
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "dlrevive-download");
@@ -66,6 +71,33 @@ public final class DownloadIntegration {
                 toast(app, "Download failed: " + e.getMessage());
             }
         });
+    }
+
+    /**
+     * Hook used with the YTM share action: starts a download from the URL being shared. The video
+     * ID is parsed from the shared watch or short link, and the shared title is reused for the
+     * filename. Sharing a song therefore also downloads it.
+     */
+    public static void downloadFromUri(Context context, Uri uri, String title) {
+        if (uri == null) {
+            Log.e(TAG, "downloadFromUri() called with no uri");
+            return;
+        }
+        String id = extractVideoId(uri.toString());
+        if (id == null) {
+            Log.w(TAG, "No video id in shared uri: " + uri);
+            return;
+        }
+        download(context, id, title);
+    }
+
+    /** Extract an 11-character YouTube video ID from a watch, short, live, or embed URL. */
+    static String extractVideoId(String url) {
+        if (url == null) {
+            return null;
+        }
+        Matcher matcher = VIDEO_ID_PATTERN.matcher(url);
+        return matcher.find() ? matcher.group(1) : null;
     }
 
     private static DownloadConfig loadConfig(Context app) {

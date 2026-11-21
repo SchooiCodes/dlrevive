@@ -11,79 +11,51 @@ import com.android.tools.smali.dexlib2.AccessFlags
 import java.io.File
 
 /**
- * Locates the YouTube Music menu handler that receives a song selection.
+ * The share-intent builder in YouTube Music 8.40.54.
  *
- * This is a deliberately broad starting fingerprint. It must be narrowed against the actual
- * target APK during calibration (milestone 7): constrain the class type and method name until
- * exactly one method matches, then adjust the parameter indices below.
+ * Production YTM classes are obfuscated, and the per-song download menu handler could not be
+ * identified statically. This method is stable enough to locate: it receives the Context, the
+ * song title and the share Uri, which is everything the downloader needs. Hooking it makes
+ * sharing a song also start its download.
  */
-internal val downloadMenuItemFingerprint = object : MethodFingerprint(
+internal val shareIntentFingerprint = object : MethodFingerprint(
+    returnType = "Landroid/content/Intent;",
+    accessFlags = AccessFlags.PUBLIC.value or AccessFlags.STATIC.value,
+    parameters = listOf(
+        "Landroid/content/Context;",
+        "Ljava/lang/String;",
+        "Ljava/lang/String;",
+        "Ljava/lang/String;",
+        "Landroid/net/Uri;",
+    ),
     customFingerprint = { method, classDef ->
-        classDef.type.startsWith("Lcom/google/android/apps/youtube/music/") &&
-            method.name.contains("download", ignoreCase = true)
+        classDef.type == "Lajgu;" && method.name == "a"
     },
 ) {}
 
 @Patch(
     name = "Restore song downloads",
-    description = "Adds a Download action that resolves YouTube Music audio in-process.",
+    description = "Starts an audio download when a song is shared, using in-process resolution.",
     compatiblePackages = [
-        CompatiblePackage(name = "com.google.android.apps.youtube.music"),
+        CompatiblePackage(name = "com.google.android.apps.youtube.music", versions = ["8.40.54"]),
     ],
 )
-class DownloadSongsPatch : BytecodePatch(setOf(downloadMenuItemFingerprint)) {
+class DownloadSongsPatch : BytecodePatch(setOf(shareIntentFingerprint)) {
 
     override fun execute(context: BytecodeContext) {
         mergeIntegrationsDex(context)
 
-        val result = downloadMenuItemFingerprint.result ?: throw PatchException(
-            "Download menu method was not found. Narrow downloadMenuItemFingerprint for the " +
+        val result = shareIntentFingerprint.result ?: throw PatchException(
+            "Share intent builder was not found. Recalibrate shareIntentFingerprint for the " +
                 "target YouTube Music APK before applying this patch.",
         )
 
-        // 1-based parameter numbers of the matched method. Calibrate these against the APK.
-        val contextParam = 1
-        val videoIdParam = 2
-        val titleParam = 3
-
-        val method = result.method
-        val parameterCount = method.parameters.size
-        val isStatic = method.accessFlags and AccessFlags.STATIC.value != 0
-        val pOffset = if (isStatic) -1 else 0
-
-        fun requireParam(index: Int, name: String) {
-            if (index < 1 || index > parameterCount) {
-                throw PatchException(
-                    "$name parameter index $index is out of range for " +
-                        "${method.name} (has $parameterCount parameters)",
-                )
-            }
-        }
-        requireParam(contextParam, "Context")
-        requireParam(videoIdParam, "videoId")
-
-        val registers = method.implementation?.registerCount ?: 0
-        if (registers < 3) {
-            throw PatchException(
-                "${method.name} only has $registers registers; at least 3 are required " +
-                    "for the injected download call.",
-            )
-        }
-
-        val smali = buildString {
-            append("move-object/from16 v0, p${contextParam + pOffset}\n")
-            append("move-object/from16 v1, p${videoIdParam + pOffset}\n")
-            if (titleParam in 1..parameterCount) {
-                append("move-object/from16 v2, p${titleParam + pOffset}\n")
-            } else {
-                append("const/4 v2, 0x0\n")
-            }
-            append(
-                "invoke-static {v0, v1, v2}, " +
-                    "Ldev/dlrevive/integrations/DownloadIntegration;->download(" +
-                    "Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)V\n",
-            )
-        }
+        // Static method: p0 = Context, p1 = title, p4 = Uri. Invoke using the parameter
+        // registers directly so no extra scratch registers are required.
+        val smali =
+            "invoke-static {p0, p4, p1}, " +
+                "Ldev/dlrevive/integrations/DownloadIntegration;->downloadFromUri(" +
+                "Landroid/content/Context;Landroid/net/Uri;Ljava/lang/String;)V"
 
         result.mutableMethod.addInstructions(0, smali)
     }
