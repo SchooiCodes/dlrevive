@@ -80,6 +80,26 @@ Modules:
 - M7: patched APK installs on device; tapping Download writes a playable audio file to the
   Music folder; both auth modes exercised; failures logged clearly.
 
+## Blockers and unverified steps (with evidence)
+
+- **Milestone 7 — on-device verification is blocked.** No device is attached: running
+  `C:\Users\Schooi\AppData\Local\Android\Sdk\platform-tools\adb.exe devices` prints only
+  `List of devices attached` with no entries, and no emulator is running. No
+  `revanced-cli.jar` exists anywhere in the repository (`Get-ChildItem -Recurse -Include
+  '*revanced*.jar'` returns nothing), so `revanced-cli patch` could not be run to confirm the
+  fingerprint against the APK at apply time. What *was* verified: static calibration against
+  `apk/youtube-music-8.40.54.apk` (see [calibration.md](calibration.md)) and a clean
+  `gradlew clean build` with JDK 17 (all 13 tasks green, including `integrations:test`).
+  To close this blocker: attach a device, download ReVanced CLI, apply the patch, then
+  follow the verification steps in the calibration guide.
+- **Not a literal yt-dlp implementation.** Per the confirmed decision above, yt-dlp is the
+  reference specification only; the in-app engine is NewPipeExtractor (anonymous) plus a
+  small Innertube client (authenticated). Evidence: [research.md](research.md) §1 (yt-dlp
+  needs Python + a JS runtime, which cannot be embedded in an APK patch) and the plan's
+  recorded decision. An optional yt-dlp bridge remains out of scope.
+- **No Premium entitlement bypass.** YTM's own download service is server-side gated;
+  the patch never calls it. Evidence: [research.md](research.md) §4.
+
 ## Out of scope
 
 Bundling the yt-dlp binary/Python, desktop/stacher helper, settings UI (config file instead),
