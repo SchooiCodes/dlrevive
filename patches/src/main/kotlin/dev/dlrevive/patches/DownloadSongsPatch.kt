@@ -24,7 +24,10 @@ val restoreSongDownloadsPatch = bytecodePatch(
     description = "Repurposes YTM's native Download action to use in-process audio resolution "
             + "instead of Premium-gated offline downloads.",
 ) {
-    compatibleWith("com.google.android.apps.youtube.music"("8.40.54"))
+    compatibleWith(
+        "com.google.android.apps.youtube.music"("8.40.54"),
+        "app.revanced.android.apps.youtube.music"("8.40.54"),
+    )
 
     // Bundled integrations DEX (NewPipeExtractor + Innertube resolver + DownloadManager entrypoint).
     extendWith("dlrevive-classes.dex")

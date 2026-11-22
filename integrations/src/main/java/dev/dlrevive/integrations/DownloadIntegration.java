@@ -60,6 +60,8 @@ public final class DownloadIntegration {
     public static void init(Context context) {
         if (context != null) {
             appContext = context.getApplicationContext();
+            Log.i(TAG, "Native download hook installed");
+            Toast.makeText(appContext, "dlrevive patch active", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -72,6 +74,8 @@ public final class DownloadIntegration {
         if (appContext == null || videoId == null || !VIDEO_ID_ONLY.matcher(videoId).matches()) {
             return false;
         }
+        Log.i(TAG, "Native download tapped: " + videoId);
+        Toast.makeText(appContext, "dlrevive: Download tapped " + videoId, Toast.LENGTH_SHORT).show();
         download(appContext, videoId, null);
         return true;
     }
