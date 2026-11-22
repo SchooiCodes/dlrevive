@@ -14,7 +14,7 @@ Follow the [plan](docs/plan.md) for scope and milestones.
 | 4. Anonymous audio resolution | Done |
 | 5. Authenticated audio resolution | Done |
 | 6. ReVanced injection patch | Done |
-| 7. On-device calibration + verification | Static calibration done; device test pending |
+| 7. On-device calibration + verification | Full patch set builds and launches on device; end-to-end download still manual |
 | 8. Docs + final commit | Done |
 
 The patch is calibrated for **YouTube Music 8.40.54**. Production YTM classes are obfuscated and no
@@ -72,7 +72,8 @@ $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
 Outputs:
 
 - `integrations/build/dex/classes.dex` — bundled into the patch JAR as `dlrevive-classes.dex`
-- `patches/build/libs/dlvrevive-patches.jar` — the ReVanced patch
+- `patches/build/libs/dlvrevive-patches-manager.jar` — the ReVanced Manager patch bundle
+  (contains `classes.dex`, the `dlrevive-classes.dex` resource and Manager manifest attributes)
 
 `local.properties` (gitignored) must contain your SDK path:
 
@@ -80,20 +81,31 @@ Outputs:
 sdk.dir=C:\\Users\\<you>\\AppData\\Local\\Android\\Sdk
 ```
 
-## Apply
+## Apply with ReVanced Manager (recommended)
 
-Calibrate the fingerprint first ([guide](docs/calibration.md)), then apply with ReVanced CLI:
+Build the bundle, then add it as a **local patch source** in ReVanced Manager 2.6.0:
 
 ```powershell
-java -jar revanced-cli.jar list-patches -p patches\build\libs\dlvrevive-patches.jar
-java -jar revanced-cli.jar patch -p patches\build\libs\dlvrevive-patches.jar `
-    -o youtube-music-revived.apk youtube-music.apk
-adb install -r youtube-music-revived.apk
+$env:JAVA_HOME = 'C:\Program Files\Java\jdk-17'
+$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+.\gradlew.bat :patches:build --console=plain --offline
+adb push patches\build\libs\dlvrevive-patches-manager.jar /sdcard/Download/dlvrevive-patches.bin
 ```
 
-Check your ReVanced CLI version's `--help` for exact flag names. The patched APK is signed
-differently from stock YouTube Music, so it cannot be installed over it — uninstall stock YTM
-first or use a rooted setup.
+Manager's file picker filters by MIME type, so the JAR is pushed with a `.bin` extension. In
+Manager: **Patches → pencil → Add patches → Select from storage → Download → dlvrevive-patches.bin**.
+Select an arm64 YouTube Music 8.40.54 APK, keep the **full default patch selection** and tick
+**Restore song downloads**, then **Patch → Install**.
+
+The default selection must include the stock **GmsCore support** patch. Without it, a build
+installed as `com.google.android.apps.youtube.music` with a non-Google signature is rejected by
+Google Play Services and exits on launch with
+`Failed to fetch kids onboarding status, finishing the App.` (see [REPORT.md](docs/REPORT.md)).
+The stock patch set also changes the package to `app.revanced.android.apps.youtube.music`, which
+can be installed alongside stock YTM. ReVanced Patches 6.2.1 has no "Spoof signature" patch.
+
+For the legacy Patcher 19 build, ReVanced CLI **v4.6.0** was used (`revanced-cli.jar` is not
+shipped here); see [REPORT.md](docs/REPORT.md) for the exact commands and caveats.
 
 ## Configuration
 
@@ -123,7 +135,8 @@ behaviour; malformed or missing files fall back to defaults.
 
 ## Limitations
 
-- Not calibrated yet: the current fingerprint is broad and will fail until narrowed for your APK.
+- Calibrated for YouTube Music 8.40.54 only; other versions need a new fingerprint (see the
+  [calibration guide](docs/calibration.md)).
 - Anonymous resolution depends on NewPipeExtractor, which breaks whenever YouTube changes its
   clients. Update the dependency and recalibrate as needed.
 - Authenticated resolution skips `signatureCipher`-protected formats (solving YouTube's JS

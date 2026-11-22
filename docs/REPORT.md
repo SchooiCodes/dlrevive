@@ -1,135 +1,114 @@
-# Final report
+# Report
 
-Target: YouTube Music `com.google.android.apps.youtube.music` **8.40.54**
-(`apk/youtube-music-8.40.54.apk`). Patches are calibrated for this version only.
+Target: YouTube Music **8.40.54**. All patches are calibrated for this version only.
 
-## Implemented
+## Current state (ReVanced Manager compatible)
 
-| Area | File | What it does |
-| --- | --- | --- |
-| Patch | `patches/src/main/kotlin/dev/dlrevive/patches/DownloadSongsPatch.kt` | ReVanced `BytecodePatch`. Fingerprints the 8.40.54 share-intent builder `Lajgu;->a(...)` (returns `Intent`, `public static`, 5 params) and injects, at index 0, `invoke-static {p0, p4, p1}, Ldev/dlrevive/integrations/DownloadIntegration;->downloadFromUri(Context, Uri, String)V`. Declares compatibility with YTM 8.40.54. |
-| Patch | `patches/src/main/java/dev/dlrevive/patches/DexMerge.java` | Adds the bundled integrations DEX to the patcher context and enables DEX merging. |
-| Entrypoint | `integrations/.../DownloadIntegration.java` | Parses the video ID from the shared URL, runs resolution + `DownloadManager` enqueue on a background executor, writes a default config on first use, posts a toast on the main looper. |
-| Resolvers | `StreamResolver.java`, `NewPipeResolver.java`, `InnertubeResolver.java`, `InnertubeResponseParser.java`, `HttpDownloader.java` | Anonymous resolution via NewPipeExtractor; authenticated resolution via a small Innertube `player` client using cookies / PO token / visitor data, falling back to anonymous on failure. |
-| Selection | `AudioStreamSelector.java`, `ResolvedStream.java` | Mirrors yt-dlp `best*[vcodec=none]`: picks the highest-bitrate audio-only stream with a small preference bonus for the configured container / opus / m4a. |
-| Persistence / helpers | `DownloadConfig.java`, `FileNames.java`, `ResolutionException.java`, `UnavailableResolver.java` | JSON config, safe filenames, typed errors. |
-| Packaging | `integrations/build.gradle.kts`, `patches/build.gradle.kts` | D8-dexes a fat JAR to `classes.dex`, embeds it in the patch JAR as `/dlrevive-classes.dex`. |
-| Tests | `integrations/src/test/java/dev/dlrevive/integrations/*` | 5 JUnit test classes covering ID extraction, config parsing, filename sanitising, stream selection and Innertube response parsing. |
-| Docs | `docs/research.md`, `docs/plan.md`, `docs/calibration.md`, `README.md` | Research, plan, fingerprint recalibration guide, build/apply/config instructions. |
+The patch is a **Patcher 22** patch and is distributed as a prebuilt patch bundle JAR that
+ReVanced Manager loads as a local patch source:
 
-Commits, in order: `f856d0e`, `b8ab899`, `2d3621c`, `ec7acd4`, `c31e1d3`, `bbaae64`, `b8a33f5`, `cbf1806`, `2059fcf`, plus the documentation commit for the verified apply/install results.
+- `patches/src/main/kotlin/dev/dlrevive/patches/DownloadSongsPatch.kt` — top-level
+  `restoreSongDownloadsPatch = bytecodePatch(...) { compatibleWith("com.google.android.apps.youtube.music"("8.40.54")); extendWith("dlrevive-classes.dex"); apply { ... } }`.
+  It finds `Lajgu;->a` (the 8.40.54 share-intent builder) and injects at index 0:
+  `invoke-static {p0, p4, p1}, Ldev/dlrevive/integrations/DownloadIntegration;->downloadFromUri(Landroid/content/Context;Landroid/net/Uri;Ljava/lang/String;)V`
+  (`p0` = Context, `p1` = title, `p4` = Uri).
+- `patches/build.gradle.kts` — compiles against the Patcher 22 classes bundled in
+  `revanced-cli-6.0.0-all.jar` (`compileOnly`, downloaded into `build/cli`), sets the Manager
+  manifest attributes, copies `integrations/build/dex/classes.dex` into the bundle as
+  `dlrevive-classes.dex`, and **D8-compiles the patch classes into a root-level `classes.dex`**
+  (required by Manager's Android patch loader; otherwise
+  `lanchon.multidexlib2.EmptyMultiDexContainerException` / "Couldn't load patches").
+- Output: `patches/build/libs/dlvrevive-patches-manager.jar` (~1.57 MB) containing
+  `classes.dex`, `dlrevive-classes.dex`, `DownloadSongsPatchKt.class`, and manifest attributes
+  `Name: dlrevive patches`, `Version: 1.0.0`, plus description/source/author/license.
+- `integrations/` — unchanged Java resolver/selector/DownloadManager code.
 
-## Build result
+Commits for this work: `193c3f6` (Patcher 22 port, `DexMerge.java` removed) and `3160807`
+(D8-compiled `classes.dex` packaged in the Manager bundle).
 
-Verified from a clean state with JDK 17 (the default `java` on PATH is a JRE 25 and cannot run
-Gradle's compilation tasks):
+## Root cause of the "crashes the moment I open it" report
 
-```powershell
-$env:JAVA_HOME = 'C:\Program Files\Java\jdk-17'
-$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
-.\gradlew.bat clean build
+The earlier single-patch build installed over the **stock package name**
+`com.google.android.apps.youtube.music` with a self-signed key. Process-alive checks were
+misleading: the process stays up while the activity exits. Filtering logcat by the launch
+window showed:
+
+```
+E YouTubeMusic: Failed to fetch kids onboarding status, finishing the App.
+E Auth: java.lang.SecurityException: GoogleCertificatesRslt: not allowed:
+  pkg=com.google.android.apps.youtube.music,
+  sha256=[c9dc1bf028374f0cb2be20f0f420fd2eba734f137e83b59c6b4b74d61742e9f0], ...
 ```
 
-Result: **BUILD SUCCESSFUL**, 13/13 tasks executed, including `integrations:test` and
-`integrations:dexIntegrations`. Outputs:
+So the app deliberately calls `finish()` when the kids-onboarding status call fails,
+because stock Google Play Services rejects the re-signed APK's certificate. It is **not** a
+Java crash and **not** our injected instruction:
 
-- `integrations/build/dex/classes.dex`
-- `patches/build/libs/dlvrevive-patches.jar`
+- the hook is in the share-intent builder, not startup;
+- `dexdump` of the installed APK showed `Lajgu;->a` is `PUBLIC STATIC`, `ins: 5`, parameters
+  `(Context, String, String, String, Uri)` — the registered `{p0, p4, p1}` mapping is correct;
+- a control launch of the stock, Google-signed 8.40.54 APK produced no onboarding error and
+  the activity stayed in the foreground.
 
-## On-device verification (performed)
+**Fix/configuration:** build through ReVanced Manager with the **full default patch set**,
+which includes the stock **GmsCore support** patch (and the stock package-name change to
+`app.revanced.android.apps.youtube.music`) in addition to `Restore song downloads`.
+Manager 2.6.0's ReVanced Patches 6.2.1 has **no "Spoof signature" patch**, so that older
+workaround is unavailable; GmsCore support is the supported path.
 
-Using ReVanced CLI **v4.6.0** (newer v5/v6 CLI versions bundle a patcher without
-`BytecodeContext` and cannot load this patch):
+## Verified with ReVanced Manager 2.6.0 (device <device-serial>)
 
-1. `list-patches -p -v` on the patch JAR lists "Restore song downloads" for package
-   `com.google.android.apps.youtube.music`, version `8.40.54`.
-2. Applying the patch logs **"Restore song downloads succeeded"** and merges the DEX. The
-   patched DEX contains `dev/dlrevive/integrations/DownloadIntegration` (verified by scanning
-   the extracted `classes*.dex` bytes).
-3. The patched APK was signed with SDK `apksigner` (`apksigner verify`: v2 + v3 schemes OK).
-4. `adb install -r` → **Success** on the attached device, and
-   `pm path com.google.android.apps.youtube.music` resolves to `/data/app/.../base.apk`.
-5. The app process starts and remains alive with no crash/fatal in logcat.
+1. Build bundle: `$env:JAVA_HOME='C:\Program Files\Java\jdk-17'; .\gradlew.bat :patches:build --console=plain --offline` → BUILD SUCCESSFUL.
+2. Push `patches/build/libs/dlvrevive-patches-manager.jar` to the device (Manager's local
+   picker requires a `.bin` MIME workaround: `adb shell cp ... /sdcard/Download/dlvrevive-patches.bin`).
+3. Manager → Patches → pencil → Add patches → Select from storage → pick the `.bin`.
+   Manager shows `dlrevive patches 1.0.0 • 1 patch` next to `ReVanced Patches 6.2.1 • 46 patches`.
+4. Select YouTube Music 8.40.54 APK, keep the stock default selection (20 patches) and
+   ensure `Restore song downloads` is checked, tap Patch. Build completed: stock patches and
+   `Restore song downloads` all `completed`, `Saving 2/2`.
+5. Install through Manager (Play Protect scan → install) → installs as
+   `app.revanced.android.apps.youtube.music`.
+6. Launch with `adb shell monkey -p app.revanced.android.apps.youtube.music -c android.intent.category.LAUNCHER 1`.
+   Logcat: **0** "Failed to fetch kids onboarding", **0** `GoogleCertificatesRslt`,
+   **0** FATAL EXCEPTION / VerifyError / NoSuchMethodError / NoClassDefFoundError / dlrevive
+   errors. `dumpsys window` showed focus on YTM's own activity, and the UI was interactive.
+7. Pulled the installed `base.apk`: the integration DEX (`DownloadIntegration`) is present in
+   its DEX files. Full-set compatibility confirmed.
 
-Not verified: the signed-in UI action (Share → playable audio file). The device is in active
-personal use, so its UI was not driven. This is the only remaining manual check.
-
-## Exact build, patch, sign and install commands
+### Exact Manager build/install commands
 
 ```powershell
 cd C:<repo-root>
 $env:JAVA_HOME = 'C:\Program Files\Java\jdk-17'
 $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
-.\gradlew.bat clean build
+.\gradlew.bat :patches:build --console=plain --offline
 
-# ReVanced CLI v4.6.0 is required for this patcher API (v5/v6 cannot load the patch).
-# It is not shipped in this repo; download revanced-cli-4.6.0-all.jar and set its path:
-$cli = 'C:\Users\Schooi\AppData\Local\Temp\opencode\revanced-cli-4.6.0-all.jar'
-
-# Some Windows environments leave the Gradle output JAR unopenable (delete-pending quirk).
-# If `jar tf $jar` fails, reassemble it from the compiled classes:
-$jar = 'C:<repo-root>\patches\build\libs\dlvrevive-patches.jar'
-$assembled = "$env:TEMP\opencode\dlvrevive-patches-assembled.jar"
-$stage = "$env:TEMP\opencode\patchjar"
-if (-not (Test-Path $assembled)) {
-  New-Item -ItemType Directory -Force $stage | Out-Null
-  Copy-Item -Recurse -Force 'patches\build\classes\kotlin\main\*' $stage
-  Copy-Item -Recurse -Force 'patches\build\classes\java\main\*' $stage
-  Copy-Item -Recurse -Force 'patches\build\resources\main\*' $stage
-  & "$env:JAVA_HOME\bin\jar.exe" --create --file $assembled -C $stage .
-}
-
-# Use an arm64 8.40.54 APK on arm64-only devices; the bundled apk/ file is 32-bit only.
-$apk = 'C:\Users\Schooi\Downloads\com.google.android.apps.youtube.music_8.40.54-84054240_minAPI26(arm64-v8a)(nodpi)_apkmirror.com.apk'
-$work = "$env:TEMP\opencode\ytm-patchwork"
-$unsigned = "$work\$([IO.Path]::GetFileName($apk))"
-$signed = "$env:TEMP\opencode\ytmusic-dlrevive-arm64.apk"
-
-java -jar $cli patch -b $assembled -o "$work\patched.apk" `
-  --custom-aapt2-binary='C:\Users\Schooi\AppData\Local\Android\Sdk\build-tools\36.0.0\aapt2.exe' `
-  -t $work $apk
-# The CLI's built-in signer fails with 'JCE cannot authenticate the provider BC' on JDK 17;
-# it still leaves the aligned unsigned APK at <temp>\<apk filename>.
-
-# Create a keystore once (keep it outside git):
-& "$env:JAVA_HOME\bin\keytool.exe" -genkeypair -v -storetype PKCS12 `
-  -keystore "$env:TEMP\opencode\dlrevive.p12" -alias 'ReVanced Key' `
-  -storepass <redacted> -keypass <redacted> -dname 'CN=dlrevive' -validity 10000
-& 'C:\Users\Schooi\AppData\Local\Android\Sdk\build-tools\36.0.0\apksigner.bat' sign `
-  --ks "$env:TEMP\opencode\dlrevive.p12" --ks-key-alias 'ReVanced Key' `
-  --ks-pass pass:<redacted> --key-pass pass:<redacted> `
-  --out $signed $unsigned
-& 'C:\Users\Schooi\AppData\Local\Android\Sdk\build-tools\36.0.0\apksigner.bat' verify $signed
-
-adb install -r $signed
+adb push patches\build\libs\dlvrevive-patches-manager.jar /sdcard/Download/dlvrevive-patches-manager.jar
+adb shell cp /sdcard/Download/dlvrevive-patches-manager.jar /sdcard/Download/dlvrevive-patches.bin
+adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Download/dlvrevive-patches.bin
+# In ReVanced Manager 2.6.0: Patches tab -> pencil -> Add patches -> Select from storage
+# -> My Files -> Internal storage -> Download -> dlvrevive-patches.bin -> Done -> Add.
+# Apps tab -> YouTube Music 8.40.54 -> Select patches (keep defaults + tick Restore song
+# downloads) -> Save -> Patch -> Install.
 ```
 
-After install, open a song and use **Share** — this both shares and starts the download.
-Inspect `Music/dlvrevive/` and `adb logcat | findstr dlrevive` to confirm. A config file is
-written on first use at `<external files dir>/dlrevive/config.json`
-(see `README.md` for keys). The patched APK uses a different key than stock YouTube Music, so
-uninstall stock YTM first (or use a rooted/mounted setup).
+## Legacy CLI path (Patcher 19; superseded by the Manager path)
 
-## Not implemented, with evidence
+For reference, the original patch (before the Patcher 22 port) was applied with ReVanced CLI
+**v4.6.0**; CLI v5/v6 cannot load Patcher 19 patches. That build was signed with SDK
+`apksigner` (CLI's BKS signer fails on JDK 17 with `JCE cannot authenticate the provider BC`)
+and installed, but with the stock package name and no GmsCore support it exhibited the
+signature/onboarding failure described above. See git history before `193c3f6`.
 
-1. **Signed-in end-to-end download is untested.** The patch applies, the APK installs and the
-   app launches (evidence above), but triggering Share → download with a signed-in account was
-   not automated because the attached device is in active personal use. Evidence for what
-   *was* verified: CLI v4.6.0 apply log, patched-DEX scan, `apksigner verify`, `adb install`,
-   `pm path`, logcat. Remaining step: manually share a song and check `Music/dlvrevive/` and
-   `adb logcat | findstr dlrevive`.
-2. **Not a literal yt-dlp implementation.** Per the confirmed decision above, yt-dlp is the
-   reference specification only; the in-app engine is NewPipeExtractor (anonymous) plus a
-   small Innertube client (authenticated). Evidence: [research.md](research.md) §1 (yt-dlp
-   needs Python + a JS runtime, which cannot be embedded in an APK patch) and the plan's
-   recorded decision. An optional yt-dlp bridge remains out of scope.
-3. **A dedicated per-song Download menu item was not added.** Production YTM 8.40.54 obfuscates
-   its classes and static inspection found no per-song download handler; the share-intent builder
-   was the stable, reachable hook. Consequence: sharing a song also starts its download.
-   Evidence: `docs/calibration.md`.
-4. **YTM's own Premium-gated download service is not bypassed.** It validates entitlement
-   server-side; the patch fetches the direct audio stream instead (`docs/research.md` §4).
-5. **32-bit APK cannot install on the device under test.** `apk/youtube-music-8.40.54.apk` is
-   `armeabi-v7a` only, while the device is arm64-v8a only: `adb install` returned
-   `INSTALL_FAILED_NO_MATCHING_ABIS`. An arm64 8.40.54 APK was used instead; the fingerprint
-   matched and installation succeeded.
+## Not implemented / unverified
+
+1. **Signed-in end-to-end download (Share → playable file)** is still untested; the attached
+   device is in active personal use. The app with the full patch set launches and our
+   integration DEX is present, but the actual download action should be checked manually.
+2. **Not literal yt-dlp**: yt-dlp is the reference spec only; the in-app engine is
+   NewPipeExtractor plus a small custom Innertube client. Evidence: [research.md](research.md) §1.
+3. **No dedicated Download menu item**: the 8.40.54 share-intent builder is the stable hook,
+   so sharing a song also starts its download. Evidence: [calibration.md](calibration.md).
+4. **No Premium entitlement bypass**: YTM's own download service is server-side gated;
+   the patch fetches the direct audio stream. Evidence: [research.md](research.md) §4.
+5. **32-bit APK cannot install on the arm64-only device**: use an arm64 8.40.54 APK.

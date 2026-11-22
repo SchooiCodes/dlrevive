@@ -82,6 +82,19 @@ Modules:
 
 ## Blockers and unverified steps (with evidence)
 
+- **Launch failure diagnosed and fixed via patch-set configuration (ReVanced Manager).** The
+  patched app was originally built over the stock package name `com.google.android.apps.youtube.music`
+  with a self-signed key and no GmsCore support. It appeared to "crash on open": logcat showed
+  `E YouTubeMusic: Failed to fetch kids onboarding status, finishing the App.` together with
+  `GoogleCertificatesRslt: not allowed` from stock Google Play Services, so the app called
+  `finish()` after the re-signed APK failed Google's certificate check. This is not a JVM
+  exception and not caused by our injected instruction (the hook is in the share-intent builder,
+  and `dexdump` confirmed the register mapping). Building through ReVanced Manager 2.6.0 with
+  the **full default patch set** (which includes stock **GmsCore support** and renames the
+  package to `app.revanced.android.apps.youtube.music`) plus `Restore song downloads` makes the
+  app launch cleanly: no onboarding error, no GMS certificate rejection, focus on YTM, no
+  FATAL/VerifyError/NoSuchMethodError. ReVanced Patches 6.2.1 has no "Spoof signature" patch,
+  so GmsCore support is the supported fix. Full details and exact commands: [REPORT.md](REPORT.md).
 - **Milestone 7 — partially closed; end-to-end download untested.** A device is now attached
   (`adb devices` → `<device-serial>`, Samsung SM-A556B, Android 17, arm64-v8a only). ReVanced
   **CLI v4.6.0** is required: our patch is compiled against `revanced-patcher 19.2.1-dev.1`
