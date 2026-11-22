@@ -39,6 +39,11 @@ public final class DownloadIntegration {
     private static final Pattern VIDEO_ID_PATTERN = Pattern.compile(
             "(?:v=|/v/|/embed/|/live/|youtu\\.be/)([A-Za-z0-9_-]{11})");
 
+    /** Matches the bare 11-character video id passed to YTM's native offline action handler. */
+    private static final Pattern VIDEO_ID_ONLY = Pattern.compile("[A-Za-z0-9_-]{11}");
+
+    private static volatile Context appContext;
+
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "dlrevive-download");
         thread.setDaemon(true);
@@ -46,6 +51,29 @@ public final class DownloadIntegration {
     });
 
     private DownloadIntegration() {
+    }
+
+    /**
+     * Captures the Application Context once at startup. Called from the first Application.onCreate
+     * in the patched app; keeping it here avoids needing a new Android component/manifest entry.
+     */
+    public static void init(Context context) {
+        if (context != null) {
+            appContext = context.getApplicationContext();
+        }
+    }
+
+    /**
+     * Handles the native YTM Download action. The patched hook calls this before the original
+     * Premium-gated offline command. Returns true when the action was handled (so the patch can
+     * return from the original method), false for non-video commands that must be left alone.
+     */
+    public static boolean handleNativeDownload(String videoId) {
+        if (appContext == null || videoId == null || !VIDEO_ID_ONLY.matcher(videoId).matches()) {
+            return false;
+        }
+        download(appContext, videoId, null);
+        return true;
     }
 
     /** Start a download for the given song. Safe to call from any thread. */
