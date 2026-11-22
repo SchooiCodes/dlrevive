@@ -1,14 +1,9 @@
 package dev.dlrevive.patches
 
-import app.revanced.patcher.data.BytecodeContext
+import app.revanced.com.android.tools.smali.dexlib2.mutable.MutableMethod
 import app.revanced.patcher.extensions.InstructionExtensions.addInstructions
-import app.revanced.patcher.fingerprint.MethodFingerprint
-import app.revanced.patcher.patch.BytecodePatch
 import app.revanced.patcher.patch.PatchException
-import app.revanced.patcher.patch.annotation.CompatiblePackage
-import app.revanced.patcher.patch.annotation.Patch
-import com.android.tools.smali.dexlib2.AccessFlags
-import java.io.File
+import app.revanced.patcher.patch.bytecodePatch
 
 /**
  * The share-intent builder in YouTube Music 8.40.54.
@@ -18,58 +13,39 @@ import java.io.File
  * song title and the share Uri, which is everything the downloader needs. Hooking it makes
  * sharing a song also start its download.
  */
-internal val shareIntentFingerprint = object : MethodFingerprint(
-    returnType = "Landroid/content/Intent;",
-    accessFlags = AccessFlags.PUBLIC.value or AccessFlags.STATIC.value,
-    parameters = listOf(
-        "Landroid/content/Context;",
-        "Ljava/lang/String;",
-        "Ljava/lang/String;",
-        "Ljava/lang/String;",
-        "Landroid/net/Uri;",
-    ),
-    customFingerprint = { method, classDef ->
-        classDef.type == "Lajgu;" && method.name == "a"
-    },
-) {}
-
-@Patch(
+@Suppress("unused")
+val restoreSongDownloadsPatch = bytecodePatch(
     name = "Restore song downloads",
     description = "Starts an audio download when a song is shared, using in-process resolution.",
-    compatiblePackages = [
-        CompatiblePackage(name = "com.google.android.apps.youtube.music", versions = ["8.40.54"]),
-    ],
-)
-class DownloadSongsPatch : BytecodePatch(setOf(shareIntentFingerprint)) {
+) {
+    compatibleWith("com.google.android.apps.youtube.music"("8.40.54"))
 
-    override fun execute(context: BytecodeContext) {
-        mergeIntegrationsDex(context)
+    // Bundled integrations DEX (NewPipeExtractor + Innertube resolver + DownloadManager entrypoint).
+    extendWith("dlrevive-classes.dex")
 
-        val result = shareIntentFingerprint.result ?: throw PatchException(
-            "Share intent builder was not found. Recalibrate shareIntentFingerprint for the " +
-                "target YouTube Music APK before applying this patch.",
+    apply {
+        val classDef = classDefs.firstOrNull { it.type == "Lajgu;" }
+            ?: throw PatchException("share-intent builder class Lajgu; not found")
+
+        val mutableMethod = classDefs.getOrReplaceMutable(classDef).methods.firstOrNull { method ->
+            method.name == "a" &&
+                method.returnType == "Landroid/content/Intent;" &&
+                method.parameters?.map { it.type } == listOf(
+                    "Landroid/content/Context;",
+                    "Ljava/lang/String;",
+                    "Ljava/lang/String;",
+                    "Ljava/lang/String;",
+                    "Landroid/net/Uri;",
+                )
+        } as? MutableMethod
+            ?: throw PatchException("share-intent builder method Lajgu;->a not found")
+
+        // p0 = Context, p1 = title, p4 = Uri.
+        mutableMethod.addInstructions(
+            0,
+            """
+                invoke-static {p0, p4, p1}, Ldev/dlrevive/integrations/DownloadIntegration;->downloadFromUri(Landroid/content/Context;Landroid/net/Uri;Ljava/lang/String;)V
+            """.trimIndent(),
         )
-
-        // Static method: p0 = Context, p1 = title, p4 = Uri. Invoke using the parameter
-        // registers directly so no extra scratch registers are required.
-        val smali =
-            "invoke-static {p0, p4, p1}, " +
-                "Ldev/dlrevive/integrations/DownloadIntegration;->downloadFromUri(" +
-                "Landroid/content/Context;Landroid/net/Uri;Ljava/lang/String;)V"
-
-        result.mutableMethod.addInstructions(0, smali)
-    }
-
-    private fun mergeIntegrationsDex(context: BytecodeContext) {
-        val stream = DownloadSongsPatch::class.java
-            .getResourceAsStream("/dlrevive-classes.dex")
-            ?: throw PatchException("Bundled integrations DEX (/dlrevive-classes.dex) is missing")
-
-        val dexFile = File.createTempFile("dlrevive-integrations", ".dex")
-        dexFile.deleteOnExit()
-        stream.use { input ->
-            dexFile.outputStream().use { output -> input.copyTo(output) }
-        }
-        DexMerge.add(context, dexFile)
     }
 }
