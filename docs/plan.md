@@ -82,16 +82,22 @@ Modules:
 
 ## Blockers and unverified steps (with evidence)
 
-- **Milestone 7 — on-device verification is blocked.** No device is attached: running
-  `C:\Users\Schooi\AppData\Local\Android\Sdk\platform-tools\adb.exe devices` prints only
-  `List of devices attached` with no entries, and no emulator is running. No
-  `revanced-cli.jar` exists anywhere in the repository (`Get-ChildItem -Recurse -Include
-  '*revanced*.jar'` returns nothing), so `revanced-cli patch` could not be run to confirm the
-  fingerprint against the APK at apply time. What *was* verified: static calibration against
-  `apk/youtube-music-8.40.54.apk` (see [calibration.md](calibration.md)) and a clean
-  `gradlew clean build` with JDK 17 (all 13 tasks green, including `integrations:test`).
-  To close this blocker: attach a device, download ReVanced CLI, apply the patch, then
-  follow the verification steps in the calibration guide.
+- **Milestone 7 — partially closed; end-to-end download untested.** A device is now attached
+  (`adb devices` → `<device-serial>`, Samsung SM-A556B, Android 17, arm64-v8a only). ReVanced
+  **CLI v4.6.0** is required: our patch is compiled against `revanced-patcher 19.2.1-dev.1`
+  and needs both `BytecodePatch` and `app/revanced/patcher/data/BytecodeContext`; CLI v5.x/v6.x
+  bundles a newer patcher without `BytecodeContext`. With CLI v4.6.0 the patch applies
+  successfully ("Restore song downloads succeeded") to both the 32-bit APK in `apk/` and a
+  matching arm64 8.40.54 APK. Verified at runtime: patched DEX contains
+  `dev/dlrevive/integrations/DownloadIntegration`; the signed APK installs
+  (`adb install -r` → Success); `pm path com.google.android.apps.youtube.music` resolves;
+  the app process starts and stays alive with no crash in logcat. What remains unverified is
+  the signed-in UI action (Share → download writes a playable file): the device is in active
+  personal use, so driving its UI was avoided. Exact working commands are in
+  [REPORT.md](REPORT.md). Notes: the bundled 32-bit APK cannot install on arm64-only hardware
+  (`INSTALL_FAILED_NO_MATCHING_ABIS`); use an arm64 8.40.54 APK. CLI v4.6.0's BKS signer is
+  broken on JDK 17 (`JCE cannot authenticate the provider BC`), so sign with the Android SDK
+  `apksigner.bat` instead.
 - **Not a literal yt-dlp implementation.** Per the confirmed decision above, yt-dlp is the
   reference specification only; the in-app engine is NewPipeExtractor (anonymous) plus a
   small Innertube client (authenticated). Evidence: [research.md](research.md) §1 (yt-dlp
