@@ -40,15 +40,21 @@ public final class InnertubeResolver implements StreamResolver {
 
     @Override
     public ResolvedStream resolve(String videoId) throws ResolutionException {
+        // Do NOT fall back to NewPipe here: NewPipeExtractor v0.27.1 calls
+        // URLDecoder.decode(String, Charset) (API 30+) and throws NoSuchMethodError on API 29.
+        // Failover to other resolvers is handled centrally by DownloadPipeline.resolveWithFallback,
+        // which catches Error as well. Surface the real Innertube failure as the cause.
         try {
             ResolvedStream stream = resolveAuthenticated(videoId);
             if (stream != null) {
                 return stream;
             }
-        } catch (Exception ignored) {
-            // Fall through to the anonymous resolver.
+            throw new ResolutionException("Innertube returned no playable stream for " + videoId);
+        } catch (ResolutionException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ResolutionException("Innertube resolution failed for " + videoId, e);
         }
-        return new NewPipeResolver(config.getPreferredExtension()).resolve(videoId);
     }
 
     private ResolvedStream resolveAuthenticated(String videoId) throws Exception {
@@ -65,8 +71,9 @@ public final class InnertubeResolver implements StreamResolver {
         byte[] body = buildRequest(
                 videoId, timestamp, config.getVisitorData())
                 .toString().getBytes(StandardCharsets.UTF_8);
+        // NewPipeExtractor's Request constructor is (httpMethod, url, ...).
         Request request = new Request(
-                PLAYER_URL, "POST", toMultiMap(headers), body, Localization.DEFAULT, false);
+                "POST", PLAYER_URL, toMultiMap(headers), body, Localization.DEFAULT, false);
         Response response = downloader.execute(request);
         String json = response.responseBody();
 
@@ -89,8 +96,8 @@ public final class InnertubeResolver implements StreamResolver {
     private long fetchSignatureTimestamp(String videoId) {
         try {
             Request request = new Request(
-                    "https://www.youtube.com/embed/" + videoId,
-                    "GET", Collections.emptyMap(), null, Localization.DEFAULT, false);
+                    "GET", "https://www.youtube.com/embed/" + videoId,
+                    Collections.emptyMap(), null, Localization.DEFAULT, false);
             Response response = downloader.execute(request);
             Matcher matcher = SIGNATURE_TIMESTAMP.matcher(response.responseBody());
             return matcher.find() ? Long.parseLong(matcher.group(1)) : 0L;

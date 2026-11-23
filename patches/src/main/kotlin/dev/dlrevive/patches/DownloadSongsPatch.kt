@@ -4,25 +4,31 @@ import app.revanced.com.android.tools.smali.dexlib2.mutable.MutableMethod
 import app.revanced.patcher.extensions.InstructionExtensions.addInstructions
 import app.revanced.patcher.patch.PatchException
 import app.revanced.patcher.patch.bytecodePatch
+import com.android.tools.smali.dexlib2.iface.instruction.ReferenceInstruction
+import com.android.tools.smali.dexlib2.iface.reference.MethodReference
+
+private const val TRACK_CONTROLLER_CLASS = "Llhe;"
+private const val SHARE_CLASS = "Lajgu;"
+private const val ABOUT_CLASS =
+    "Lcom/google/android/apps/youtube/music/settings/fragment/AboutSettingsFragment;"
 
 /**
- * Repurposes YouTube Music's native Download action.
+ * Restores downloads in YouTube Music 8.40.54.
  *
- * YTM 8.40.54 has no static `download_button` resource: the per-song Download action is a
- * server-driven Innertube command that ends up in `Llfu;.a(String, Lawrn)` (classes5.dex). That
- * method normally enqueues YTM's own Premium-gated offline download. We replace it: when the
- * string argument is a bare 11-character video id, we hand it to our own resolver/DownloadManager
- * path and return, so no entitlement check is involved.
+ * The primary trigger is the native per-song Download action: `Ljtz;.c` (OfflineVideoCommand)
+ * dispatches the server's ACTION_ADD command to `Lawsd;.h`, implemented only by `Llhe;`
+ * (MusicOfflineTrackEntityActionsController). We take over there before YTM's Premium gate.
+ * The share-intent builder `Lajgu;.a` is kept as a documented fallback trigger.
  *
- * The integration needs an Application Context. There is no convenient Context on the offline
- * command path, so the app's base Application.onCreate (`Lbflb;.onCreate()V`, the superclass of
- * YouTubeMusicTikTokRoot_Application) is hooked to capture it once at startup.
+ * A third hook in AboutSettingsFragment appends a dlrevive status line to the stock version
+ * summary, including whether the download hook has actually run at runtime.
  */
 @Suppress("unused")
 val restoreSongDownloadsPatch = bytecodePatch(
     name = "Restore song downloads",
-    description = "Repurposes YTM's native Download action to use in-process audio resolution "
-            + "instead of Premium-gated offline downloads.",
+    description = "Starts an audio download from YTM's native Download action (share fallback), "
+            + "using in-process resolution instead of Premium-gated offline downloads, "
+            + "and shows patch status in Settings > About.",
 ) {
     compatibleWith(
         "com.google.android.apps.youtube.music"("8.40.54"),
@@ -33,47 +39,89 @@ val restoreSongDownloadsPatch = bytecodePatch(
     extendWith("dlrevive-classes.dex")
 
     apply {
-        // 1. Capture the Application Context for the integration.
-        val appClass = classDefs.firstOrNull { it.type == "Lbflb;" }
-            ?: throw PatchException("base Application class Lbflb; not found")
-        val appOnCreate = classDefs.getOrReplaceMutable(appClass).methods.firstOrNull { method ->
-            method.name == "onCreate" &&
-                method.returnType == "V" &&
-                method.parameters?.isEmpty() == true
-        } as? MutableMethod
-            ?: throw PatchException("Lbflb;.onCreate()V not found")
-
-        // p0 is the Application (a Context). init() stores getApplicationContext().
-        appOnCreate.addInstructions(
-            0,
-            """
-                invoke-static {p0}, Ldev/dlrevive/integrations/DownloadIntegration;->init(Landroid/content/Context;)V
-            """.trimIndent(),
-        )
-
-        // 2. Replace the native offline command handler.
-        val downloadClass = classDefs.firstOrNull { it.type == "Llfu;" }
-            ?: throw PatchException("offline download controller class Llfu; not found")
-        val offlineAction = classDefs.getOrReplaceMutable(downloadClass).methods.firstOrNull { method ->
-            method.name == "a" &&
+        // 1. PRIMARY: the native per-song Download action. OfflineVideoCommand (Ljtz;.c) turns the
+        //    server's ACTION_ADD command into Lawsd;.h(String, ...), implemented only by Llhe;
+        //    (MusicOfflineTrackEntityActionsController). Its first instruction logs a "blocked"
+        //    check that returns early for non-Premium users. We take over at entry: p0 is the
+        //    controller (its field .b is the Activity Context), p1 is the video-id token.
+        val trackClass = classDefs.firstOrNull { it.type == TRACK_CONTROLLER_CLASS }
+            ?: throw PatchException("track actions controller $TRACK_CONTROLLER_CLASS not found")
+        val trackMethod = classDefs.getOrReplaceMutable(trackClass).methods.firstOrNull { method ->
+            method.name == "h" &&
                 method.returnType == "V" &&
                 method.parameters?.map { it.type } == listOf(
                     "Ljava/lang/String;",
-                    "Lawrn;",
+                    "Lbuwa;",
+                    "Lapzw;",
+                    "Lbumy;",
                 )
         } as? MutableMethod
-            ?: throw PatchException("Llfu;.a(String,Lawrn)V not found")
+            ?: throw PatchException("$TRACK_CONTROLLER_CLASS;.h track download handler not found")
 
-        // p1 = the video id / command string, p2 = Lawrn. Only bare video ids are intercepted;
-        // control commands (PPSV/PPSE/PPSDST, etc.) fall through to the original handler.
-        offlineAction.addInstructions(
+        trackMethod.addInstructions(
             0,
             """
-                invoke-static {p1}, Ldev/dlrevive/integrations/DownloadIntegration;->handleNativeDownload(Ljava/lang/String;)Z
-                move-result v0
-                if-eqz v0, :continue
+                iget-object v0, p0, Llhe;->b:Ldh;
+                invoke-static {v0, p1}, Ldev/dlrevive/integrations/DownloadIntegration;->handleTrackDownload(Landroid/content/Context;Ljava/lang/String;)V
                 return-void
-                :continue
+            """.trimIndent(),
+        )
+        // 2. FALLBACK: the share-intent builder, kept for users who share instead of using the
+        //    Download button. p0 = Context, p1 = title, p4 = Uri. Parameter registers are used
+        //    directly; the method has outs = 3, which is enough for this 3-argument call.
+        val shareClass = classDefs.firstOrNull { it.type == SHARE_CLASS }
+            ?: throw PatchException("share intent builder class $SHARE_CLASS not found")
+        val shareMethod = classDefs.getOrReplaceMutable(shareClass).methods.firstOrNull { method ->
+            method.name == "a" &&
+                method.returnType == "Landroid/content/Intent;" &&
+                method.parameters?.map { it.type } == listOf(
+                    "Landroid/content/Context;",
+                    "Ljava/lang/String;",
+                    "Ljava/lang/String;",
+                    "Ljava/lang/String;",
+                    "Landroid/net/Uri;",
+                )
+        } as? MutableMethod
+            ?: throw PatchException("$SHARE_CLASS;.a share intent builder not found")
+
+        shareMethod.addInstructions(
+            0,
+            """
+                invoke-static {p0, p4, p1}, Ldev/dlrevive/integrations/DownloadIntegration;->downloadFromUri(Landroid/content/Context;Landroid/net/Uri;Ljava/lang/String;)V
+            """.trimIndent(),
+        )
+
+        // 3. Append the status line in Settings > About. Find the Preference.n(CharSequence) call
+        //    (obfuscated setSummary) that displays the stock version, and inject right before it.
+        val aboutClass = classDefs.firstOrNull { it.type == ABOUT_CLASS }
+            ?: throw PatchException("About screen class $ABOUT_CLASS not found")
+        val aboutMethod = classDefs.getOrReplaceMutable(aboutClass).methods.firstOrNull { method ->
+            method.name == "onCreatePreferences" &&
+                method.returnType == "V" &&
+                method.parameters?.map { it.type } == listOf(
+                    "Landroid/os/Bundle;",
+                    "Ljava/lang/String;",
+                )
+        } as? MutableMethod
+            ?: throw PatchException("$ABOUT_CLASS;.onCreatePreferences not found")
+
+        val summaryCallIndex = aboutMethod.implementation!!.instructions.indexOfFirst { instruction ->
+            val reference = (instruction as? ReferenceInstruction)?.reference
+            reference is MethodReference &&
+                reference.definingClass == "Landroidx/preference/Preference;" &&
+                reference.name == "n"
+        }
+        if (summaryCallIndex < 0) {
+            throw PatchException("version summary call not found in $ABOUT_CLASS;.onCreatePreferences")
+        }
+
+        // v5 holds the stock version String at this point. Replace it with the combined status
+        // text; the original Preference.n(v4, v5) then displays both values.
+        aboutMethod.addInstructions(
+            summaryCallIndex,
+            """
+                invoke-static {v5}, Ldev/dlrevive/integrations/AboutStatus;->build(Ljava/lang/CharSequence;)Ljava/lang/String;
+                move-result-object v5
             """.trimIndent(),
         )
     }

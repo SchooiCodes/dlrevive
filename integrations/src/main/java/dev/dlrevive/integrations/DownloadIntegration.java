@@ -14,7 +14,6 @@ import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -32,17 +31,15 @@ public final class DownloadIntegration {
 
     public static final String TAG = "dlrevive";
 
-    private static final String USER_AGENT =
+    static final String USER_AGENT =
             "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 "
                     + "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36";
 
     private static final Pattern VIDEO_ID_PATTERN = Pattern.compile(
             "(?:v=|/v/|/embed/|/live/|youtu\\.be/)([A-Za-z0-9_-]{11})");
 
-    /** Matches the bare 11-character video id passed to YTM's native offline action handler. */
-    private static final Pattern VIDEO_ID_ONLY = Pattern.compile("[A-Za-z0-9_-]{11}");
-
-    private static volatile Context appContext;
+    /** The native download command carries a bare video id as its token. */
+    private static final Pattern BARE_ID_PATTERN = Pattern.compile("[A-Za-z0-9_-]{11}");
 
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "dlrevive-download");
@@ -54,30 +51,27 @@ public final class DownloadIntegration {
     }
 
     /**
-     * Captures the Application Context once at startup. Called from the first Application.onCreate
-     * in the patched app; keeping it here avoids needing a new Android component/manifest entry.
+     * Primary trigger: the native per-song Download action. The patched hook calls this with the
+     * Activity Context and the String token from the OfflineVideoCommand proto before YTM's own
+     * (Premium-gated) track controller runs. We handle the download and return so the gate never
+     * blocks it.
      */
-    public static void init(Context context) {
-        if (context != null) {
-            appContext = context.getApplicationContext();
-            Log.i(TAG, "Native download hook installed");
-            Toast.makeText(appContext, "dlrevive patch active", Toast.LENGTH_SHORT).show();
+    public static void handleTrackDownload(Context context, String token) {
+        // The About screen reads this to tell "patch applied" from "patch ran".
+        RuntimeState.markDownloadHookRan();
+        Log.d(TAG, "download button hook fired: token=" + token);
+        if (context == null) {
+            Log.e(TAG, "dlrevive: failed — no context passed to the download button hook");
+            return;
         }
-    }
-
-    /**
-     * Handles the native YTM Download action. The patched hook calls this before the original
-     * Premium-gated offline command. Returns true when the action was handled (so the patch can
-     * return from the original method), false for non-video commands that must be left alone.
-     */
-    public static boolean handleNativeDownload(String videoId) {
-        if (appContext == null || videoId == null || !VIDEO_ID_ONLY.matcher(videoId).matches()) {
-            return false;
+        String id = extractTrackId(token);
+        if (id == null) {
+            Log.w(TAG, "dlrevive: failed — no video id in download command: " + token);
+            toast(context.getApplicationContext(),
+                    "dlrevive: failed — no video id in download command");
+            return;
         }
-        Log.i(TAG, "Native download tapped: " + videoId);
-        Toast.makeText(appContext, "dlrevive: Download tapped " + videoId, Toast.LENGTH_SHORT).show();
-        download(appContext, videoId, null);
-        return true;
+        download(context, id, null);
     }
 
     /** Start a download for the given song. Safe to call from any thread. */
@@ -89,18 +83,29 @@ public final class DownloadIntegration {
         final Context app = context.getApplicationContext();
         final String id = videoId.trim();
         final String name = title == null || title.trim().isEmpty() ? id : title.trim();
+        Log.d(TAG, "download requested: id=" + id + " title=" + name);
 
         EXECUTOR.execute(() -> {
             try {
                 DownloadConfig config = loadConfig(app);
-                StreamResolver resolver = createResolver(config);
-                ResolvedStream stream = resolver.resolve(id);
+                NewPipeResolver newPipe = new NewPipeResolver(config.getPreferredExtension());
+                InnertubeResolver innertube = new InnertubeResolver(config);
+                StreamResolver primary = DownloadPipeline.selectResolver(
+                        config, newPipe, innertube);
+                StreamResolver fallback = DownloadPipeline.fallbackResolver(
+                        config, newPipe, innertube);
+                Log.d(TAG, "resolving stream for " + id
+                        + " via " + primary.getClass().getSimpleName());
+                ResolvedStream stream = DownloadPipeline.resolveWithFallback(primary, fallback, id);
+                Log.d(TAG, "stream resolved for " + id + ": " + stream.getUrl());
                 long requestId = enqueue(app, config, stream, name);
-                Log.i(TAG, "Queued download " + requestId + " for " + name);
-                toast(app, "Downloading: " + name);
+                Log.d(TAG, "DownloadManager enqueued request " + requestId
+                        + " for " + name + " -> " + stream.getUrl());
+                toast(app, "dlrevive: download started — " + name);
             } catch (Exception e) {
-                Log.e(TAG, "Download failed for " + id, e);
-                toast(app, "Download failed: " + e.getMessage());
+                String reason = DownloadPipeline.friendlyReason(e);
+                Log.e(TAG, "Download failed for " + id + ": " + reason, e);
+                toast(app, "dlrevive: failed — " + reason);
             }
         });
     }
@@ -111,13 +116,18 @@ public final class DownloadIntegration {
      * filename. Sharing a song therefore also downloads it.
      */
     public static void downloadFromUri(Context context, Uri uri, String title) {
-        if (uri == null) {
-            Log.e(TAG, "downloadFromUri() called with no uri");
+        // The About screen reads this to tell "patch applied" from "patch ran".
+        RuntimeState.markDownloadHookRan();
+        Log.d(TAG, "share hook fired: uri=" + uri + " title=" + title);
+        if (context == null) {
+            Log.e(TAG, "dlrevive: failed — no context passed to the download hook");
             return;
         }
-        String id = extractVideoId(uri.toString());
+        String id = uri == null ? null : extractVideoId(uri.toString());
         if (id == null) {
-            Log.w(TAG, "No video id in shared uri: " + uri);
+            Log.w(TAG, "dlrevive: failed — no video id in shared uri: " + uri);
+            toast(context.getApplicationContext(),
+                    "dlrevive: failed — no video id in shared link");
             return;
         }
         download(context, id, title);
@@ -130,6 +140,18 @@ public final class DownloadIntegration {
         }
         Matcher matcher = VIDEO_ID_PATTERN.matcher(url);
         return matcher.find() ? matcher.group(1) : null;
+    }
+
+    /** The native command token is usually a bare id, but tolerate a full URL as well. */
+    static String extractTrackId(String token) {
+        if (token == null) {
+            return null;
+        }
+        String value = token.trim();
+        if (BARE_ID_PATTERN.matcher(value).matches()) {
+            return value;
+        }
+        return extractVideoId(value);
     }
 
     private static DownloadConfig loadConfig(Context app) {
@@ -152,33 +174,19 @@ public final class DownloadIntegration {
         return config;
     }
 
-    /** Resolver selection, driven by the persisted config. */
-    private static StreamResolver createResolver(DownloadConfig config) {
-        if (config.getAuthMode() == DownloadConfig.AuthMode.AUTHENTICATED) {
-            return new InnertubeResolver(config);
-        }
-        return new NewPipeResolver(config.getPreferredExtension());
-    }
-
     private static long enqueue(Context app, DownloadConfig config, ResolvedStream stream,
                                 String title) {
-        String extension = stream.getExtension().replaceAll("[^a-z0-9]", "");
-        if (extension.isEmpty()) {
-            extension = "m4a";
-        }
-        String relativePath = config.getDownloadSubdirectory() + "/"
-                + FileNames.sanitize(title) + "." + extension;
+        DownloadPipeline.Request spec = DownloadPipeline.buildRequest(config, stream, title);
 
-        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(stream.getUrl()));
-        request.setTitle(title);
-        request.setDescription(extension.toUpperCase(Locale.ROOT) + " audio");
+        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(spec.url));
+        request.setTitle(spec.title);
+        request.setDescription(spec.description);
         request.setNotificationVisibility(
                 DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
         request.setAllowedOverRoaming(false);
-        request.setAllowedOverMetered(config.isAllowMobileData());
-        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_MUSIC, relativePath);
-        request.addRequestHeader("User-Agent", USER_AGENT);
-        for (Map.Entry<String, String> header : stream.getHeaders().entrySet()) {
+        request.setAllowedOverMetered(spec.allowMobileData);
+        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_MUSIC, spec.relativePath);
+        for (Map.Entry<String, String> header : spec.headers.entrySet()) {
             request.addRequestHeader(header.getKey(), header.getValue());
         }
 
@@ -188,6 +196,16 @@ public final class DownloadIntegration {
             throw new IllegalStateException("DownloadManager is unavailable");
         }
         return manager.enqueue(request);
+    }
+
+    /** Short, user-readable failure reason for the toast (exception messages can be very long). */
+    static String shortReason(Exception e) {
+        String message = e.getMessage();
+        if (message == null || message.trim().isEmpty()) {
+            return e.getClass().getSimpleName();
+        }
+        message = message.replace('\n', ' ').replace('\r', ' ').trim();
+        return message.length() > 120 ? message.substring(0, 117) + "..." : message;
     }
 
     private static void toast(Context app, String message) {

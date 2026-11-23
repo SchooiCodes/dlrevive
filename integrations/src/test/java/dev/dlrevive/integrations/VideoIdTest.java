@@ -31,4 +31,23 @@ public class VideoIdTest {
         assertNull(DownloadIntegration.extractVideoId("https://example.com/song"));
         assertNull(DownloadIntegration.extractVideoId(null));
     }
+
+    @Test
+    public void nativeCommandTokenAcceptsBareId() {
+        assertEquals(ID, DownloadIntegration.extractTrackId(ID));
+        assertEquals(ID, DownloadIntegration.extractTrackId("  " + ID + "  "));
+    }
+
+    @Test
+    public void nativeCommandTokenAcceptsUrl() {
+        assertEquals(ID, DownloadIntegration.extractTrackId(
+                "https://music.youtube.com/watch?v=" + ID));
+    }
+
+    @Test
+    public void nativeCommandTokenRejectsNonId() {
+        assertNull(DownloadIntegration.extractTrackId("PPSV"));
+        assertNull(DownloadIntegration.extractTrackId(""));
+        assertNull(DownloadIntegration.extractTrackId(null));
+    }
 }

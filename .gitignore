@@ -38,6 +38,9 @@ desktop.ini
 # Local tooling / secrets
 *.jks
 *.keystore
+
+# Device verification evidence (screenshots, dumps, pulled audio) - large, machine-local
+device-capture/
 *.pem
 *.p12
 .secrets/
