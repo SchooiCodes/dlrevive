@@ -74,10 +74,10 @@ public final class DownloadIntegration {
         String id = extractTrackId(token);
         if (id == null) {
             Log.w(TAG, "dlrevive: failed — no video id in download command: " + token);
-            toast(context.getApplicationContext(),
-                    "dlrevive: failed — no video id in download command");
+            failToast(context, "no video id in download command");
             return false;
         }
+        toast(context.getApplicationContext(), ToastMessages.downloading(id));
         download(context, id, null);
         return true;
     }
@@ -109,11 +109,11 @@ public final class DownloadIntegration {
                 long requestId = enqueue(app, config, stream, name);
                 Log.d(TAG, "DownloadManager enqueued request " + requestId
                         + " for " + name + " -> " + stream.getUrl());
-                toast(app, "dlrevive: download started — " + name);
+                successToast(app, ToastMessages.started(name), config, name, stream.getExtension());
             } catch (Exception e) {
                 String reason = DownloadPipeline.friendlyReason(e);
                 Log.e(TAG, "Download failed for " + id + ": " + reason, e);
-                toast(app, "dlrevive: failed — " + reason);
+                failToast(app, reason);
             }
         });
     }
@@ -138,10 +138,10 @@ public final class DownloadIntegration {
         String id = uri == null ? null : extractVideoId(uri.toString());
         if (id == null) {
             Log.w(TAG, "dlrevive: failed — no video id in shared uri: " + uri);
-            toast(context.getApplicationContext(),
-                    "dlrevive: failed — no video id in shared link");
+            failToast(context, "no video id in shared link");
             return;
         }
+        toast(context.getApplicationContext(), ToastMessages.downloading(nameOrId(title, id)));
         download(context, id, title);
     }
 
@@ -218,6 +218,89 @@ public final class DownloadIntegration {
         }
         message = message.replace('\n', ' ').replace('\r', ' ').trim();
         return message.length() > 120 ? message.substring(0, 117) + "..." : message;
+    }
+
+    private static void failToast(Context context, String reason) {
+        toast(context.getApplicationContext(), ToastMessages.failed(reason));
+    }
+
+    private static String nameOrId(String title, String id) {
+        return title == null || title.trim().isEmpty() ? id : title.trim();
+    }
+
+    /**
+     * Show the success toast with a tap-to-open action. Best effort: if the custom view cannot be
+     * built (or the file is not indexed in MediaStore yet), fall back to a plain toast.
+     */
+    private static void successToast(Context app, String message, DownloadConfig config,
+                                     String title, String extension) {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                Uri contentUri = downloadedFileUri(app, config, title, extension);
+                if (contentUri == null) {
+                    toast(app, message);
+                    return;
+                }
+                android.view.View view = android.view.View.inflate(app,
+                        android.R.layout.simple_list_item_1, null);
+                android.widget.TextView text = view.findViewById(android.R.id.text1);
+                text.setText(message + "  (tap to open)");
+                final Uri openUri = contentUri;
+                view.setOnTouchListener((v, event) -> {
+                    if (event.getActionMasked() == android.view.MotionEvent.ACTION_UP) {
+                        try {
+                            android.content.Intent intent =
+                                    new android.content.Intent(android.content.Intent.ACTION_VIEW);
+                            intent.setDataAndType(openUri, DownloadedFiles.mimeForExtension(extension));
+                            intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                    | android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                            app.startActivity(intent);
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                    return false;
+                });
+                Toast t = new Toast(app);
+                t.setDuration(Toast.LENGTH_LONG);
+                t.setView(view);
+                t.show();
+            } catch (Throwable ignored) {
+                toast(app, message);
+            }
+        });
+    }
+
+    /** Resolve the MediaStore content Uri for the file we just queued, or null if not indexed. */
+    private static Uri downloadedFileUri(Context app, DownloadConfig config, String title,
+                                         String extension) {
+        android.database.Cursor cursor = null;
+        try {
+            String subdir = config.getDownloadSubdirectory();
+            String fileName = FileNames.sanitize(title) + "." + extension;
+            String selection = android.provider.MediaStore.Audio.Media.DATA + " LIKE ?";
+            String[] args = new String[]{"%/" + subdir + "/" + fileName};
+            cursor = app.getContentResolver().query(
+                    android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    new String[]{android.provider.MediaStore.Audio.Media._ID},
+                    selection, args, null);
+            if (cursor != null && cursor.moveToFirst()) {
+                int idx = cursor.getColumnIndex(android.provider.MediaStore.Audio.Media._ID);
+                if (idx >= 0) {
+                    return android.content.ContentUris.withAppendedId(
+                            android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                            cursor.getLong(idx));
+                }
+            }
+        } catch (Throwable ignored) {
+        } finally {
+            if (cursor != null) {
+                try {
+                    cursor.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        return null;
     }
 
     private static void toast(Context app, String message) {
