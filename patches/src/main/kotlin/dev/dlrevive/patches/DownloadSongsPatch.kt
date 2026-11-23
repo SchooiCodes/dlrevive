@@ -11,6 +11,8 @@ private const val TRACK_CONTROLLER_CLASS = "Llhe;"
 private const val SHARE_CLASS = "Lajgu;"
 private const val ABOUT_CLASS =
     "Lcom/google/android/apps/youtube/music/settings/fragment/AboutSettingsFragment;"
+private const val SETTINGS_HEADERS_CLASS =
+    "Lcom/google/android/apps/youtube/music/settings/fragment/SettingsHeadersFragment;"
 
 /**
  * Restores downloads in YouTube Music 8.40.54.
@@ -127,6 +129,30 @@ val restoreSongDownloadsPatch = bytecodePatch(
             """
                 invoke-static {v5}, Ldev/dlrevive/integrations/AboutStatus;->build(Ljava/lang/CharSequence;)Ljava/lang/String;
                 move-result-object v5
+            """.trimIndent(),
+        )
+
+        // 4. Add the dlrevive settings section to the root Settings screen. Verified target
+        //    (8.40.54): SettingsHeadersFragment.onCreatePreferences(Bundle,String)V, 7 registers;
+        //    setPreferencesFromResource(0x7f170023) is instruction index 8, so inject at index 9.
+        //    v0 holds the fragment throughout. The helper resolves Context + PreferenceScreen
+        //    reflectively and never throws into the app, so a single instruction is enough.
+        val headersClass = classDefs.firstOrNull { it.type == SETTINGS_HEADERS_CLASS }
+            ?: throw PatchException("settings headers class $SETTINGS_HEADERS_CLASS not found")
+        val headersMethod = classDefs.getOrReplaceMutable(headersClass).methods.firstOrNull { method ->
+            method.name == "onCreatePreferences" &&
+                method.returnType == "V" &&
+                method.parameters?.map { it.type } == listOf(
+                    "Landroid/os/Bundle;",
+                    "Ljava/lang/String;",
+                )
+        } as? MutableMethod
+            ?: throw PatchException("$SETTINGS_HEADERS_CLASS;.onCreatePreferences not found")
+
+        headersMethod.addInstructions(
+            9,
+            """
+                invoke-static {v0}, Ldev/dlrevive/integrations/SettingsUiBuilder;->installFromFragment(Ljava/lang/Object;)V
             """.trimIndent(),
         )
     }
