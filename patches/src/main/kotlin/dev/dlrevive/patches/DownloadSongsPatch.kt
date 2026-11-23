@@ -180,5 +180,26 @@ val restoreSongDownloadsPatch = bytecodePatch(
                 invoke-static {v1, v2}, Ldev/dlrevive/integrations/LibraryEntry;->install(Landroid/content/Context;Landroid/view/Menu;)V
             """.trimIndent(),
         )
+
+        // 6. Visible Library entry: the menu item above is not user-visible on 8.40.54 (Library
+        //    root has no overflow button), so add a small tappable button to the Library toolbar.
+        //    Verified target: Ljis;.onViewCreated(View,Bundle)V, PUBLIC FINAL, registers 4, ins 3,
+        //    outs 3; p1 (v2) is the root View at index 0 (before super, before v2 is overwritten).
+        val libraryViewMethod = classDefs.getOrReplaceMutable(libraryClass).methods.firstOrNull { method ->
+            method.name == "onViewCreated" &&
+                method.returnType == "V" &&
+                method.parameters?.map { it.type } == listOf(
+                    "Landroid/view/View;",
+                    "Landroid/os/Bundle;",
+                )
+        } as? MutableMethod
+            ?: throw PatchException("$LIBRARY_BROWSE_CLASS;.onViewCreated not found")
+
+        libraryViewMethod.addInstructions(
+            0,
+            """
+                invoke-static {v2}, Ldev/dlrevive/integrations/LibraryViewEntry;->install(Landroid/view/View;)V
+            """.trimIndent(),
+        )
     }
 }
