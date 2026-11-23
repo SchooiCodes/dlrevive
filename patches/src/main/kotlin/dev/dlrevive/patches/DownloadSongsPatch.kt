@@ -58,12 +58,17 @@ val restoreSongDownloadsPatch = bytecodePatch(
         } as? MutableMethod
             ?: throw PatchException("$TRACK_CONTROLLER_CLASS;.h track download handler not found")
 
+        // handleTrackDownload returns true when it handled the tap; on false (disabled by the
+        // user, or no valid video id) we fall through to YTM's original Premium-gated handler.
         trackMethod.addInstructions(
             0,
             """
                 iget-object v0, p0, Llhe;->b:Ldh;
-                invoke-static {v0, p1}, Ldev/dlrevive/integrations/DownloadIntegration;->handleTrackDownload(Landroid/content/Context;Ljava/lang/String;)V
+                invoke-static {v0, p1}, Ldev/dlrevive/integrations/DownloadIntegration;->handleTrackDownload(Landroid/content/Context;Ljava/lang/String;)Z
+                move-result v0
+                if-eqz v0, :continue
                 return-void
+                :continue
             """.trimIndent(),
         )
         // 2. FALLBACK: the share-intent builder, kept for users who share instead of using the

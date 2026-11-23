@@ -56,22 +56,30 @@ public final class DownloadIntegration {
      * (Premium-gated) track controller runs. We handle the download and return so the gate never
      * blocks it.
      */
-    public static void handleTrackDownload(Context context, String token) {
-        // The About screen reads this to tell "patch applied" from "patch ran".
-        RuntimeState.markDownloadHookRan();
+    public static boolean handleTrackDownload(Context context, String token) {
         Log.d(TAG, "download button hook fired: token=" + token);
         if (context == null) {
             Log.e(TAG, "dlrevive: failed — no context passed to the download button hook");
-            return;
+            return false;
         }
+        // Honor the persisted enable/disable switch. When disabled, return false so the patched
+        // smali falls through to YTM's original (Premium-gated) handler instead of consuming the tap.
+        DownloadConfig config = ConfigStore.loadOrCreate(context);
+        if (!HookGate.isEnabled(config)) {
+            Log.d(TAG, "download hook disabled by settings — falling through to YTM");
+            return false;
+        }
+        // The About screen reads this to tell "patch applied" from "patch ran".
+        RuntimeState.markDownloadHookRan();
         String id = extractTrackId(token);
         if (id == null) {
             Log.w(TAG, "dlrevive: failed — no video id in download command: " + token);
             toast(context.getApplicationContext(),
                     "dlrevive: failed — no video id in download command");
-            return;
+            return false;
         }
         download(context, id, null);
+        return true;
     }
 
     /** Start a download for the given song. Safe to call from any thread. */
@@ -116,13 +124,17 @@ public final class DownloadIntegration {
      * filename. Sharing a song therefore also downloads it.
      */
     public static void downloadFromUri(Context context, Uri uri, String title) {
-        // The About screen reads this to tell "patch applied" from "patch ran".
-        RuntimeState.markDownloadHookRan();
         Log.d(TAG, "share hook fired: uri=" + uri + " title=" + title);
         if (context == null) {
             Log.e(TAG, "dlrevive: failed — no context passed to the download hook");
             return;
         }
+        if (!HookGate.isEnabled(ConfigStore.loadOrCreate(context))) {
+            Log.d(TAG, "share hook disabled by settings — skipping download");
+            return;
+        }
+        // The About screen reads this to tell "patch applied" from "patch ran".
+        RuntimeState.markDownloadHookRan();
         String id = uri == null ? null : extractVideoId(uri.toString());
         if (id == null) {
             Log.w(TAG, "dlrevive: failed — no video id in shared uri: " + uri);
