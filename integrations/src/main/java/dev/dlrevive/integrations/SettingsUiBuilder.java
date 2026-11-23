@@ -434,13 +434,26 @@ public final class SettingsUiBuilder {
                 Log.w(TAG, "no MediaStore entry for " + file.getName());
                 return;
             }
-            String mime = "m4a".equals(ext) ? "audio/mp4"
-                    : "opus".equals(ext) ? "audio/ogg" : "audio/webm";
+            String mime = DownloadedFiles.mimeForExtension(ext);
+            // Prefer YTM's own preview player (in-app, takes a content Uri, no Premium gate).
+            // Falls back to the generic system player if YTM cannot handle the intent.
             Intent intent = new Intent(Intent.ACTION_VIEW);
             intent.setDataAndType(uri, mime);
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
                     | Intent.FLAG_ACTIVITY_NEW_TASK);
-            ctx.startActivity(intent);
+            intent.setClassName(ctx.getPackageName(), LibraryEntry.PREVIEW_PLAYER_ACTIVITY);
+            try {
+                ctx.startActivity(intent);
+                Log.d(TAG, "opened file in YTM preview player: " + file.getName());
+                return;
+            } catch (Throwable nativeFailure) {
+                Log.w(TAG, "YTM preview player unavailable, using system player", nativeFailure);
+            }
+            Intent fallback = new Intent(Intent.ACTION_VIEW);
+            fallback.setDataAndType(uri, mime);
+            fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(fallback);
         } catch (Throwable t) {
             log(t);
         }
