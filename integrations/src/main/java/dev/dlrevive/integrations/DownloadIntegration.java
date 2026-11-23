@@ -109,7 +109,8 @@ public final class DownloadIntegration {
                 long requestId = enqueue(app, config, stream, name);
                 Log.d(TAG, "DownloadManager enqueued request " + requestId
                         + " for " + name + " -> " + stream.getUrl());
-                successToast(app, ToastMessages.started(name), config, name, stream.getExtension());
+                toast(app, ToastMessages.started(name));
+                registerOpenOnComplete(app, config, name, stream.getExtension(), requestId);
             } catch (Exception e) {
                 String reason = DownloadPipeline.friendlyReason(e);
                 Log.e(TAG, "Download failed for " + id + ": " + reason, e);
@@ -229,29 +230,60 @@ public final class DownloadIntegration {
     }
 
     /**
-     * Show the success toast with a tap-to-open action. Best effort: if the custom view cannot be
-     * built (or the file is not indexed in MediaStore yet), fall back to a plain toast.
+     * Register a one-shot listener for DownloadManager completion. Only when the file has actually
+     * landed (and been indexed by MediaStore) do we show a tap-to-open toast; until then the user
+     * has already seen the immediate "downloading" and "download started" toasts.
      */
-    private static void successToast(Context app, String message, DownloadConfig config,
-                                     String title, String extension) {
+    private static void registerOpenOnComplete(Context app, DownloadConfig config, String title,
+                                               String extension, long requestId) {
+        try {
+            android.content.IntentFilter filter =
+                    new android.content.IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+            android.content.BroadcastReceiver receiver = new android.content.BroadcastReceiver() {
+                @Override
+                public void onReceive(Context ctx, android.content.Intent intent) {
+                    try {
+                        long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L);
+                        if (id != requestId) {
+                            return;
+                        }
+                        ctx.unregisterReceiver(this);
+                        Uri uri = downloadedFileUri(ctx, config, title, extension);
+                        if (uri != null) {
+                            tapToOpenToast(ctx, uri, title, extension);
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            };
+            if (android.os.Build.VERSION.SDK_INT >= 33) {
+                app.registerReceiver(receiver, filter,
+                        android.content.Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                app.registerReceiver(receiver, filter);
+            }
+        } catch (Throwable ignored) {
+            // Best effort: the plain success toast already told the user the download started.
+        }
+    }
+
+    /** Show a toast whose tap opens the finished file in a media player. */
+    private static void tapToOpenToast(Context app, Uri uri, String title, String extension) {
         new Handler(Looper.getMainLooper()).post(() -> {
             try {
-                Uri contentUri = downloadedFileUri(app, config, title, extension);
-                if (contentUri == null) {
-                    toast(app, message);
-                    return;
-                }
-                android.view.View view = android.view.View.inflate(app,
-                        android.R.layout.simple_list_item_1, null);
-                android.widget.TextView text = view.findViewById(android.R.id.text1);
-                text.setText(message + "  (tap to open)");
-                final Uri openUri = contentUri;
-                view.setOnTouchListener((v, event) -> {
+                android.widget.TextView text = new android.widget.TextView(app);
+                text.setText(ToastMessages.started(title) + "  (tap to open)");
+                text.setTextColor(android.graphics.Color.WHITE);
+                int pad = 24;
+                text.setPadding(pad, pad, pad, pad);
+                final Uri openUri = uri;
+                text.setOnTouchListener((v, event) -> {
                     if (event.getActionMasked() == android.view.MotionEvent.ACTION_UP) {
                         try {
                             android.content.Intent intent =
                                     new android.content.Intent(android.content.Intent.ACTION_VIEW);
-                            intent.setDataAndType(openUri, DownloadedFiles.mimeForExtension(extension));
+                            intent.setDataAndType(openUri,
+                                    DownloadedFiles.mimeForExtension(extension));
                             intent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                                     | android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
                             app.startActivity(intent);
@@ -262,10 +294,10 @@ public final class DownloadIntegration {
                 });
                 Toast t = new Toast(app);
                 t.setDuration(Toast.LENGTH_LONG);
-                t.setView(view);
+                t.setView(text);
                 t.show();
             } catch (Throwable ignored) {
-                toast(app, message);
+                toast(app, ToastMessages.started(title));
             }
         });
     }

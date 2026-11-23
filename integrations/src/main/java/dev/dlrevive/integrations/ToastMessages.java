@@ -13,19 +13,19 @@ public final class ToastMessages {
 
     /** Immediate feedback shown on the main thread when a Download tap is intercepted. */
     public static String downloading(String name) {
-        return PREFIX + "downloading " + label(name) + "…";
+        return PREFIX + "downloading " + label(name) + "...";
     }
 
     /** Shown after the download has been queued with DownloadManager. */
     public static String started(String name) {
-        return PREFIX + "downloading — " + label(name);
+        return PREFIX + "downloading - " + label(name);
     }
 
     /** Shown when resolution or enqueue fails; the reason is kept short. */
     public static String failed(String reason) {
         String shortReason = reason == null || reason.trim().isEmpty()
                 ? "unknown error" : reason.trim();
-        return PREFIX + "failed — " + shortReason;
+        return PREFIX + "failed - " + shortReason;
     }
 
     private static String label(String name) {
