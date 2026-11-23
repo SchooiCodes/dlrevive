@@ -49,8 +49,8 @@ public final class LibraryEntry {
             if (!shouldAdd(alreadyPresent)) {
                 return;
             }
-            MenuItem item = menu.add(0, ITEM_ID, 0, "dlrevive downloads");
-            item.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
+            MenuItem item = menu.add(0, ITEM_ID, 0, "dlrevive");
+            item.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
             item.setOnMenuItemClickListener(new MenuItem.OnMenuItemClickListener() {
                 @Override
                 public boolean onMenuItemClick(MenuItem clicked) {

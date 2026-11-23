@@ -13,8 +13,7 @@ private const val ABOUT_CLASS =
     "Lcom/google/android/apps/youtube/music/settings/fragment/AboutSettingsFragment;"
 private const val SETTINGS_HEADERS_CLASS =
     "Lcom/google/android/apps/youtube/music/settings/fragment/SettingsHeadersFragment;"
-private const val LIBRARY_BROWSE_CLASS =
-    "Lcom/google/android/apps/youtube/music/browse/LibraryBrowseFragment;"
+private const val LIBRARY_BROWSE_CLASS = "Ljis;"
 
 /**
  * Restores downloads in YouTube Music 8.40.54.
@@ -160,7 +159,7 @@ val restoreSongDownloadsPatch = bytecodePatch(
 
         // 5. Library entry point: add one tappable "dlrevive downloads" item to the Library
         //    options menu that opens the Settings screen (which hosts our dlrevive section).
-        //    Verified target (8.40.54): LibraryBrowseFragment.onCreateOptionsMenu(Menu,MenuInflater)V,
+        //    Verified target (8.40.54): Ljis; (LibraryBrowseFragment).onCreateOptionsMenu(Menu,MenuInflater)V,
         //    PUBLIC FINAL, registers 4, ins 3, 20 code units; return-void is instruction index 8.
         //    v1 = fragment (Context), v2 = Menu, v0 free scratch, outs 2 is enough.
         val libraryClass = classDefs.firstOrNull { it.type == LIBRARY_BROWSE_CLASS }
