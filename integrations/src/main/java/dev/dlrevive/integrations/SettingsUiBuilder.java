@@ -36,7 +36,7 @@ import java.util.WeakHashMap;
  *   <li>{@code Preference(Context)}, {@code PreferenceCategory(Context)} constructors</li>
  *   <li>{@code P(CharSequence)}=setTitle, {@code n(CharSequence)}=setSummary,
  *       {@code L(String)}=setKey, {@code Q(boolean)}=setVisible</li>
- *   <li>{@code PreferenceGroup.ah(Preference)}=addPreference</li>
+ *   <li>{@code PreferenceGroup.ae(Preference)}=addPreference (public; calls private ah + notify)</li>
  *   <li>{@code Preference.o : Lejw} where {@code Lejw.a():V} is the click listener hook</li>
  * </ul>
  *
@@ -75,6 +75,7 @@ public final class SettingsUiBuilder {
             if (fragment == null) {
                 return;
             }
+            Log.d(TAG, "settings hook fired: " + fragment.getClass().getName());
             Context ctx = null;
             Method getContext = findMethod(fragment.getClass(), "getContext", 0);
             if (getContext != null) {
@@ -110,6 +111,8 @@ public final class SettingsUiBuilder {
             Log.w(TAG, "install: null context or screen; skipping dlrevive settings");
             return;
         }
+        Log.d(TAG, "settings install start: ctx=" + (ctx == null ? "null" : ctx.getClass().getName())
+                + " screen=" + (preferenceScreen == null ? "null" : preferenceScreen.getClass().getName()));
         try {
             Class<?> prefClass = Class.forName(PREF_CLASS);
             Class<?> categoryClass = Class.forName(CATEGORY_CLASS);
@@ -122,8 +125,23 @@ public final class SettingsUiBuilder {
 
             Context baseCtx = ctx.getApplicationContext();
             final Context app = baseCtx != null ? baseCtx : ctx;
+            Object screen = resolveScreen(preferenceScreen, groupClass);
 
-            Object category = newPreference(categoryClass, app);
+            // Obtain the screen's PreferenceManager (getPreferenceManager():Lekv) and assign it
+            // to every preference we create via Preference.C(Lekv)=setPreferenceManager. Without
+            // this, addPreference (ag) dereferences a null manager and throws NPE.
+            Object managerValue = null;
+            try {
+                Method getPm = screen == null ? null : findMethod(screen.getClass(), "getPreferenceManager", 0);
+                if (getPm != null) {
+                    managerValue = getPm.invoke(screen);
+                }
+            } catch (Throwable t) {
+                log(t);
+            }
+            final Object manager = managerValue;
+
+            Object category = newPreference(categoryClass, app, manager);
             if (category == null) {
                 Log.w(TAG, "install: could not construct PreferenceCategory");
                 return;
@@ -131,8 +149,14 @@ public final class SettingsUiBuilder {
             callTyped(category, "P", CharSequence.class, (CharSequence) "dlrevive");
             callTyped(category, "L", String.class, "dlrevive_settings_category");
 
+            // Attach the category to the screen FIRST so it inherits the screen's
+            // PreferenceManager; only then can child rows be added (addPreference calls
+            // PreferenceManager.a() on the receiving group, which is null until attached).
+            boolean attached = call(screen, "ag", category);
+            Log.d(TAG, "settings category attached=" + attached + " manager=" + (manager != null));
+
             // --- Enable downloads -------------------------------------------------------
-            final Object enableRow = newPreference(prefClass, app);
+            final Object enableRow = newPreference(prefClass, app, manager);
             if (enableRow != null) {
                 callTyped(enableRow, "P", CharSequence.class, (CharSequence) "Enable downloads");
                 callTyped(enableRow, "n", CharSequence.class, (CharSequence) enabledSummary(app));
@@ -151,11 +175,11 @@ public final class SettingsUiBuilder {
                         }
                     }
                 });
-                call(category, "ah", enableRow);
+                call(category, "ag", enableRow);
             }
 
             // --- Audio format -----------------------------------------------------------
-            final Object formatRow = newPreference(prefClass, app);
+            final Object formatRow = newPreference(prefClass, app, manager);
             if (formatRow != null) {
                 callTyped(formatRow, "P", CharSequence.class, (CharSequence) "Audio format");
                 callTyped(formatRow, "n", CharSequence.class, (CharSequence) formatSummary(app));
@@ -176,11 +200,11 @@ public final class SettingsUiBuilder {
                         }
                     }
                 });
-                call(category, "ah", formatRow);
+                call(category, "ag", formatRow);
             }
 
             // --- Download folder --------------------------------------------------------
-            final Object folderRow = newPreference(prefClass, app);
+            final Object folderRow = newPreference(prefClass, app, manager);
             if (folderRow != null) {
                 callTyped(folderRow, "P", CharSequence.class, (CharSequence) "Download folder");
                 callTyped(folderRow, "n", CharSequence.class, (CharSequence) folderSummary(app));
@@ -201,11 +225,11 @@ public final class SettingsUiBuilder {
                         }
                     }
                 });
-                call(category, "ah", folderRow);
+                call(category, "ag", folderRow);
             }
 
             // --- Allow mobile data ------------------------------------------------------
-            final Object mobileRow = newPreference(prefClass, app);
+            final Object mobileRow = newPreference(prefClass, app, manager);
             if (mobileRow != null) {
                 callTyped(mobileRow, "P", CharSequence.class, (CharSequence) "Allow mobile data");
                 callTyped(mobileRow, "n", CharSequence.class, (CharSequence) mobileSummary(app));
@@ -224,30 +248,30 @@ public final class SettingsUiBuilder {
                         }
                     }
                 });
-                call(category, "ah", mobileRow);
+                call(category, "ag", mobileRow);
             }
 
             // --- Version / status (non-clickable) ---------------------------------------
-            Object versionRow = newPreference(prefClass, app);
+            Object versionRow = newPreference(prefClass, app, manager);
             if (versionRow != null) {
                 callTyped(versionRow, "P", CharSequence.class, (CharSequence) "Version / status");
                 callTyped(versionRow, "n", CharSequence.class, (CharSequence)
                         ("dlrevive " + AboutStatus.PATCH_VERSION + " (patch loaded)"));
                 callTyped(versionRow, "L", String.class, "dlrevive_version");
-                call(category, "ah", versionRow); // no listener -> info row
+                call(category, "ag", versionRow); // no listener -> info row
             }
 
             // --- About offline library (non-clickable) ----------------------------------
-            Object aboutRow = newPreference(prefClass, app);
+            Object aboutRow = newPreference(prefClass, app, manager);
             if (aboutRow != null) {
                 callTyped(aboutRow, "P", CharSequence.class, (CharSequence) "About offline library");
                 callTyped(aboutRow, "n", CharSequence.class, (CharSequence) OFFLINE_TRADEOFF);
                 callTyped(aboutRow, "L", String.class, "dlrevive_offline_about");
-                call(category, "ah", aboutRow); // no listener -> info row
+                call(category, "ag", aboutRow); // no listener -> info row
             }
 
             // --- My downloads (click builds/refreshes child rows) -----------------------
-            final Object downloadsRow = newPreference(prefClass, app);
+            final Object downloadsRow = newPreference(prefClass, app, manager);
             if (downloadsRow != null) {
                 callTyped(downloadsRow, "P", CharSequence.class, (CharSequence) "My downloads");
                 callTyped(downloadsRow, "n", CharSequence.class, (CharSequence) "Tap to list downloaded files");
@@ -256,15 +280,32 @@ public final class SettingsUiBuilder {
                 attachClick(app, downloadsRow, new Runnable() {
                     @Override
                     public void run() {
-                        refreshDownloads(app, prefClass, category, downloadsRow, fileRows);
+                        refreshDownloads(app, prefClass, category, downloadsRow, fileRows, manager);
                     }
                 });
-                call(category, "ah", downloadsRow);
+                call(category, "ag", downloadsRow);
             }
 
-            // --- Attach ------------------------------------------------------------------
-            Object screen = resolveScreen(preferenceScreen, groupClass);
-            boolean attached = call(screen, "ah", category);
+            // --- Verify attach (category was attached to screen earlier) -----------------
+            Method countMethod = findMethod(category.getClass(), "k", 0);
+            Object categoryCount = null;
+            if (countMethod != null) {
+                try {
+                    categoryCount = countMethod.invoke(category);
+                } catch (Throwable ignored) {
+                }
+            }
+            Method screenCount = findMethod(screen == null ? Object.class : screen.getClass(), "k", 0);
+            Object screenCountValue = null;
+            if (screenCount != null) {
+                try {
+                    screenCountValue = screenCount.invoke(screen);
+                } catch (Throwable ignored) {
+                }
+            }
+            Log.d(TAG, "settings install attached=" + attached + " categoryChildren=" + categoryCount
+                    + " screenChildren=" + screenCountValue + " screen="
+                    + (screen == null ? "null" : screen.getClass().getName()));
             if (!attached) {
                 Log.e(TAG, "install: could not attach dlrevive category to preference screen");
             }
@@ -286,7 +327,7 @@ public final class SettingsUiBuilder {
     // ---------------------------------------------------------------------------------
 
     private static void refreshDownloads(Context app, Class<?> prefClass, Object category,
-                                         Object downloadsRow, List<Object> fileRows) {
+                                         Object downloadsRow, List<Object> fileRows, Object manager) {
         try {
             // We have no verified obfuscated removePreference name, so reliably hide the old
             // rows via the verified Q(boolean)=setVisible(false), then append fresh ones.
@@ -297,15 +338,15 @@ public final class SettingsUiBuilder {
 
             DownloadConfig c = loadConfig(app);
             String subdir = c.getDownloadSubdirectory();
-            File musicRoot = Environment.getExternalStoragePublicDirectory(
-                    Environment.DIRECTORY_MUSIC);
-            File dir = new File(musicRoot, subdir);
-            java.util.List<DownloadedFiles.Entry> entries = DownloadedFiles.list(dir);
+            // On API 29+ scoped storage, File.listFiles() cannot read /sdcard/Music even though
+            // DownloadManager wrote there, so query MediaStore instead (the same entries the
+            // system music player sees).
+            java.util.List<DownloadedFiles.Entry> entries = mediaStoreDownloads(app, subdir);
             callTyped(downloadsRow, "n", CharSequence.class, (CharSequence)
                     ("Tap to refresh - " + entries.size() + " file(s) in Music/" + subdir));
 
             for (final DownloadedFiles.Entry entry : entries) {
-                Object row = newPreference(prefClass, app);
+                Object row = newPreference(prefClass, app, manager);
                 if (row == null) {
                     continue;
                 }
@@ -320,12 +361,69 @@ public final class SettingsUiBuilder {
                         openFile(app, new File(path), ext);
                     }
                 });
-                call(category, "ah", row);
+                call(category, "ag", row);
                 fileRows.add(row);
             }
         } catch (Throwable t) {
             log(t);
         }
+    }
+
+    /**
+     * List our downloaded audio files from MediaStore, filtered to the configured subfolder.
+     * Works on API 29+ where direct File access to public Music storage is restricted.
+     */
+    private static java.util.List<DownloadedFiles.Entry> mediaStoreDownloads(Context ctx, String subdir) {
+        java.util.List<DownloadedFiles.Entry> result = new ArrayList<>();
+        Cursor cursor = null;
+        try {
+            String[] projection = new String[]{
+                    MediaStore.Audio.Media.DISPLAY_NAME,
+                    MediaStore.Audio.Media.DATA,
+                    MediaStore.Audio.Media.SIZE,
+                    MediaStore.Audio.Media.DATE_MODIFIED
+            };
+            String selection = MediaStore.Audio.Media.DATA + " LIKE ?";
+            String[] args = new String[]{"%/" + subdir + "/%"};
+            cursor = ctx.getContentResolver().query(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    projection, selection, args, MediaStore.Audio.Media.DISPLAY_NAME + " ASC");
+            if (cursor == null) {
+                return result;
+            }
+            int nameCol = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME);
+            int dataCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATA);
+            int sizeCol = cursor.getColumnIndex(MediaStore.Audio.Media.SIZE);
+            int dateCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATE_MODIFIED);
+            while (cursor.moveToNext()) {
+                if (nameCol < 0 || dataCol < 0) {
+                    continue;
+                }
+                String name = cursor.getString(nameCol);
+                String path = cursor.getString(dataCol);
+                if (name == null || path == null) {
+                    continue;
+                }
+                int dot = name.lastIndexOf('.');
+                String ext = dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);
+                if (!"m4a".equals(ext) && !"opus".equals(ext) && !"webm".equals(ext)) {
+                    continue;
+                }
+                long size = sizeCol >= 0 ? cursor.getLong(sizeCol) : 0L;
+                long date = dateCol >= 0 ? cursor.getLong(dateCol) : 0L;
+                result.add(new DownloadedFiles.Entry(name, path, ext, size, date));
+            }
+        } catch (Throwable t) {
+            log(t);
+        } finally {
+            if (cursor != null) {
+                try {
+                    cursor.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        return result;
     }
 
     /** Resolve a MediaStore content:// Uri for a public-path file and open it with ACTION_VIEW. */
@@ -431,17 +529,34 @@ public final class SettingsUiBuilder {
         return candidate;
     }
 
-    private static Object newPreference(Class<?> cls, Context ctx) {
+    /** Assign the PreferenceManager (Preference.C(Lekv)) to a newly created preference. */
+    private static void assignManager(Object pref, Object manager) {
+        if (pref == null || manager == null) {
+            return;
+        }
+        callTyped(pref, "C", findManagerType(manager), manager);
+    }
+
+    private static Class<?> findManagerType(Object manager) {
+        // The declared parameter type is the obfuscated PreferenceManager class itself.
+        return manager.getClass();
+    }
+
+    private static Object newPreference(Class<?> cls, Context ctx, Object manager) {
         try {
             Constructor<?> ctor = cls.getConstructor(Context.class);
-            return ctor.newInstance(ctx);
+            Object pref = ctor.newInstance(ctx);
+            assignManager(pref, manager);
+            return pref;
         } catch (NoSuchMethodException e) {
             try {
                 for (Constructor<?> c : cls.getDeclaredConstructors()) {
                     if (c.getParameterCount() == 1
                             && c.getParameterTypes()[0].isAssignableFrom(ctx.getClass())) {
                         c.setAccessible(true);
-                        return c.newInstance(ctx);
+                        Object pref = c.newInstance(ctx);
+                        assignManager(pref, manager);
+                        return pref;
                     }
                 }
             } catch (Throwable t) {
