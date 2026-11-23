@@ -42,6 +42,29 @@ public class DownloadConfigTest {
     }
 
     @Test
+    public void saveAndLoadRoundTrip() throws Exception {
+        File file = File.createTempFile("dlrevive-config", ".json");
+        file.deleteOnExit();
+        DownloadConfig config = DownloadConfig.defaults();
+        config.setEnabled(false);
+        config.setPreferredExtension("OPUS");
+        config.setDownloadSubdirectory("my songs");
+        config.setAllowMobileData(false);
+        config.save(file);
+
+        DownloadConfig loaded = DownloadConfig.load(file);
+        assertFalse(loaded.isEnabled());
+        assertEquals("opus", loaded.getPreferredExtension());
+        assertEquals("my songs", loaded.getDownloadSubdirectory());
+        assertFalse(loaded.isAllowMobileData());
+    }
+
+    @Test
+    public void enabledDefaultsToTrue() {
+        assertTrue(DownloadConfig.defaults().isEnabled());
+    }
+
+    @Test
     public void malformedFileFallsBackToDefaults() throws Exception {
         File file = File.createTempFile("dlrevive-config", ".json");
         file.deleteOnExit();

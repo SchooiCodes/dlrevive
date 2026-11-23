@@ -5,7 +5,10 @@ import com.google.gson.annotations.SerializedName;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
@@ -45,6 +48,10 @@ public final class DownloadConfig {
     @SerializedName("allowMobileData")
     private boolean allowMobileData = true;
 
+    /** Master switch for the download hooks; when false the hooks fall through to YTM. */
+    @SerializedName("enabled")
+    private boolean enabled = true;
+
     public static DownloadConfig defaults() {
         return new DownloadConfig();
     }
@@ -66,6 +73,21 @@ public final class DownloadConfig {
     /** Serialize current settings to JSON (used to materialize defaults on first run). */
     public String toJson() {
         return GSON.toJson(normalized());
+    }
+
+    /** Persist current settings to {@code file}, creating parent directories as needed. */
+    public void save(File file) throws java.io.IOException {
+        if (file == null) {
+            throw new java.io.IOException("config file is null");
+        }
+        File parent = file.getParentFile();
+        if (parent != null) {
+            parent.mkdirs();
+        }
+        try (Writer writer = new OutputStreamWriter(
+                new FileOutputStream(file), StandardCharsets.UTF_8)) {
+            writer.write(toJson());
+        }
     }
 
     private DownloadConfig normalized() {
@@ -118,5 +140,27 @@ public final class DownloadConfig {
 
     public boolean isAllowMobileData() {
         return allowMobileData;
+    }
+
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+    }
+
+    public void setPreferredExtension(String preferredExtension) {
+        this.preferredExtension = preferredExtension;
+        normalized();
+    }
+
+    public void setDownloadSubdirectory(String downloadSubdirectory) {
+        this.downloadSubdirectory = downloadSubdirectory;
+        normalized();
+    }
+
+    public void setAllowMobileData(boolean allowMobileData) {
+        this.allowMobileData = allowMobileData;
     }
 }
