@@ -112,3 +112,10 @@ signature/onboarding failure described above. See git history before `193c3f6`.
 4. **No Premium entitlement bypass**: YTM's own download service is server-side gated;
    the patch fetches the direct audio stream. Evidence: [research.md](research.md) §4.
 5. **32-bit APK cannot install on the arm64-only device**: use an arm64 8.40.54 APK.
+
+## Note: sanitization before publishing (2026-11-25)
+Before this repository was made public, device-specific identifiers and a local signing-password
+mention were scrubbed from the tracked docs (this file and `plan.md`), and internal device-log notes
+were removed from the repository entirely. Git history was rewritten and verified to contain no
+device serials, personal paths, or password strings. This is why those documents changed shape.
+No keystore or API secret was ever committed.

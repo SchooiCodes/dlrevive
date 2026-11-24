@@ -124,3 +124,14 @@ Modules:
 Bundling the yt-dlp binary/Python, desktop/stacher helper, settings UI (config file instead),
 batch/background queue downloads, ffmpeg transcoding, bypassing YouTube's own Premium
 entitlement checks.
+
+## Note: playlist / native-player entity investigation — CLOSED (2026-11-25)
+Investigated whether a dlrevive-downloaded song could be made to appear in YTM playlists and act
+like a native track. Verdict: achievable-insertion, NOT achievable-playback. A synthetic entity row
+can be written with local protobuf builders alone (no signed server response), but tapping it routes
+through YTM's Premium/entitlement-gated native player (`Ljzn.e`, `Laoiz.k` with `rurlps`/`rurlpe`)
+which cannot resolve a local `content://` file. No clean hook was verified for the in-app playlist
+row click to redirect to our `AudioPreviewPlayerActivity` (only the MediaSession/Auto media-id router
+was found). A row that looks playable but fails on tap would be worse than the current explicit
+ACTION_VIEW/preview-player path. DECIDED: do not pursue; do not touch the entity DB or AppSearch
+index. This note closes the question so it is not re-investigated.
