@@ -133,10 +133,10 @@ tasks.named<Jar>("jar") {
             "Name" to "dlrevive patches",
             "Version" to "1.0.0",
             "Description" to "Restore YouTube Music downloads without Premium via in-app audio resolution.",
-            "Source" to "https://github.com/Schooi/dlrevive",
+            "Source" to "https://github.com/SchooiCodes/dlrevive",
             "Author" to "dlrevive",
-            "Contact" to "https://github.com/Schooi/dlrevive/issues",
-            "Website" to "https://github.com/Schooi/dlrevive",
+            "Contact" to "https://github.com/SchooiCodes/dlrevive/issues",
+            "Website" to "https://github.com/SchooiCodes/dlrevive",
             "License" to "MIT",
         ),
     )
