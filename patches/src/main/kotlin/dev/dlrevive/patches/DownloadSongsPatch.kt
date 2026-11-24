@@ -13,7 +13,6 @@ private const val ABOUT_CLASS =
     "Lcom/google/android/apps/youtube/music/settings/fragment/AboutSettingsFragment;"
 private const val SETTINGS_HEADERS_CLASS =
     "Lcom/google/android/apps/youtube/music/settings/fragment/SettingsHeadersFragment;"
-private const val LIBRARY_BROWSE_CLASS = "Ljis;"
 
 /**
  * Restores downloads in YouTube Music 8.40.54.
@@ -156,30 +155,8 @@ val restoreSongDownloadsPatch = bytecodePatch(
                 invoke-static {v0}, Ldev/dlrevive/integrations/SettingsUiBuilder;->installFromFragment(Ljava/lang/Object;)V
             """.trimIndent(),
         )
-
-        // 5. Visible Library entry: add a small tappable button to the Library toolbar that opens
-        //    the Settings screen (which hosts our dlrevive section). The earlier menu-item hook
-        //    was removed: it passed the fragment as a Context and triggered a VerifyError that
-        //    crashed the app on entering Library (and the item was not visible anyway).
-        //    Verified target: Ljis;.onViewCreated(View,Bundle)V, PUBLIC FINAL, registers 4, ins 3,
-        //    outs 3; p1 (v2) is the root View at index 0 (before super, before v2 is overwritten).
-        val libraryClass = classDefs.firstOrNull { it.type == LIBRARY_BROWSE_CLASS }
-            ?: throw PatchException("library browse class $LIBRARY_BROWSE_CLASS not found")
-        val libraryViewMethod = classDefs.getOrReplaceMutable(libraryClass).methods.firstOrNull { method ->
-            method.name == "onViewCreated" &&
-                method.returnType == "V" &&
-                method.parameters?.map { it.type } == listOf(
-                    "Landroid/view/View;",
-                    "Landroid/os/Bundle;",
-                )
-        } as? MutableMethod
-            ?: throw PatchException("$LIBRARY_BROWSE_CLASS;.onViewCreated not found")
-
-        libraryViewMethod.addInstructions(
-            0,
-            """
-                invoke-static {v2}, Ldev/dlrevive/integrations/LibraryViewEntry;->install(Landroid/view/View;)V
-            """.trimIndent(),
-        )
+        // NOTE: the Library entry-point hooks (menu item and toolbar button) were intentionally
+        // removed. The menu hook caused a VerifyError crash on entering Library; the button hook
+        // was never visually verified. The About/Settings section remains the dlrevive UI.
     }
 }

@@ -5,7 +5,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
-import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Log;
 
@@ -16,8 +15,6 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 import java.util.WeakHashMap;
 
@@ -270,21 +267,9 @@ public final class SettingsUiBuilder {
                 call(category, "ag", aboutRow); // no listener -> info row
             }
 
-            // --- My downloads (click builds/refreshes child rows) -----------------------
-            final Object downloadsRow = newPreference(prefClass, app, manager);
-            if (downloadsRow != null) {
-                callTyped(downloadsRow, "P", CharSequence.class, (CharSequence) "My downloads");
-                callTyped(downloadsRow, "n", CharSequence.class, (CharSequence) "Tap to list downloaded files");
-                callTyped(downloadsRow, "L", String.class, "dlrevive_my_downloads");
-                final List<Object> fileRows = new ArrayList<>();
-                attachClick(app, downloadsRow, new Runnable() {
-                    @Override
-                    public void run() {
-                        refreshDownloads(app, prefClass, category, downloadsRow, fileRows, manager);
-                    }
-                });
-                call(category, "ag", downloadsRow);
-            }
+            // The "My downloads" list screen was intentionally removed: it was the only UI
+            // trigger for the YTM preview-player path (openFile/mediaStoreUri remain in source
+            // as the retained B implementation, currently without a UI trigger).
 
             // --- Verify attach (category was attached to screen earlier) -----------------
             Method countMethod = findMethod(category.getClass(), "k", 0);
@@ -326,107 +311,12 @@ public final class SettingsUiBuilder {
     // Downloaded-file listing
     // ---------------------------------------------------------------------------------
 
-    private static void refreshDownloads(Context app, Class<?> prefClass, Object category,
-                                         Object downloadsRow, List<Object> fileRows, Object manager) {
-        try {
-            // We have no verified obfuscated removePreference name, so reliably hide the old
-            // rows via the verified Q(boolean)=setVisible(false), then append fresh ones.
-            for (Object old : fileRows) {
-                callTyped(old, "Q", boolean.class, false);
-            }
-            fileRows.clear();
-
-            DownloadConfig c = loadConfig(app);
-            String subdir = c.getDownloadSubdirectory();
-            // On API 29+ scoped storage, File.listFiles() cannot read /sdcard/Music even though
-            // DownloadManager wrote there, so query MediaStore instead (the same entries the
-            // system music player sees).
-            java.util.List<DownloadedFiles.Entry> entries = mediaStoreDownloads(app, subdir);
-            callTyped(downloadsRow, "n", CharSequence.class, (CharSequence)
-                    ("Tap to refresh - " + entries.size() + " file(s) in Music/" + subdir));
-
-            for (final DownloadedFiles.Entry entry : entries) {
-                Object row = newPreference(prefClass, app, manager);
-                if (row == null) {
-                    continue;
-                }
-                callTyped(row, "P", CharSequence.class, (CharSequence) entry.name);
-                callTyped(row, "n", CharSequence.class, (CharSequence)
-                        ("Music/" + subdir + "/" + entry.name + "  " + DownloadedFiles.humanSize(entry.sizeBytes)));
-                final String ext = entry.extension;
-                final String path = entry.path;
-                attachClick(app, row, new Runnable() {
-                    @Override
-                    public void run() {
-                        openFile(app, new File(path), ext);
-                    }
-                });
-                call(category, "ag", row);
-                fileRows.add(row);
-            }
-        } catch (Throwable t) {
-            log(t);
-        }
-    }
-
     /**
-     * List our downloaded audio files from MediaStore, filtered to the configured subfolder.
-     * Works on API 29+ where direct File access to public Music storage is restricted.
+     * Retained implementation of the YTM preview-player path (feature B). It currently has no UI
+     * trigger: the downloads-list screen that called it was intentionally removed.
+     *
+     * <p>Resolve a MediaStore content:// Uri for a public-path file and open it with ACTION_VIEW.</p>
      */
-    private static java.util.List<DownloadedFiles.Entry> mediaStoreDownloads(Context ctx, String subdir) {
-        java.util.List<DownloadedFiles.Entry> result = new ArrayList<>();
-        Cursor cursor = null;
-        try {
-            String[] projection = new String[]{
-                    MediaStore.Audio.Media.DISPLAY_NAME,
-                    MediaStore.Audio.Media.DATA,
-                    MediaStore.Audio.Media.SIZE,
-                    MediaStore.Audio.Media.DATE_MODIFIED
-            };
-            String selection = MediaStore.Audio.Media.DATA + " LIKE ?";
-            String[] args = new String[]{"%/" + subdir + "/%"};
-            cursor = ctx.getContentResolver().query(
-                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                    projection, selection, args, MediaStore.Audio.Media.DISPLAY_NAME + " ASC");
-            if (cursor == null) {
-                return result;
-            }
-            int nameCol = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME);
-            int dataCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATA);
-            int sizeCol = cursor.getColumnIndex(MediaStore.Audio.Media.SIZE);
-            int dateCol = cursor.getColumnIndex(MediaStore.Audio.Media.DATE_MODIFIED);
-            while (cursor.moveToNext()) {
-                if (nameCol < 0 || dataCol < 0) {
-                    continue;
-                }
-                String name = cursor.getString(nameCol);
-                String path = cursor.getString(dataCol);
-                if (name == null || path == null) {
-                    continue;
-                }
-                int dot = name.lastIndexOf('.');
-                String ext = dot < 0 ? "" : name.substring(dot + 1).toLowerCase(Locale.ROOT);
-                if (!"m4a".equals(ext) && !"opus".equals(ext) && !"webm".equals(ext)) {
-                    continue;
-                }
-                long size = sizeCol >= 0 ? cursor.getLong(sizeCol) : 0L;
-                long date = dateCol >= 0 ? cursor.getLong(dateCol) : 0L;
-                result.add(new DownloadedFiles.Entry(name, path, ext, size, date));
-            }
-        } catch (Throwable t) {
-            log(t);
-        } finally {
-            if (cursor != null) {
-                try {
-                    cursor.close();
-                } catch (Throwable ignored) {
-                }
-            }
-        }
-        return result;
-    }
-
-    /** Resolve a MediaStore content:// Uri for a public-path file and open it with ACTION_VIEW. */
     private static void openFile(Context ctx, File file, String ext) {
         try {
             Uri uri = mediaStoreUri(ctx, file);
