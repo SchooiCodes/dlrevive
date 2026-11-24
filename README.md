@@ -2,6 +2,35 @@
 
 Revive song downloads on a ReVanced-patched **YouTube Music** build, without a Premium subscription.
 
+## Add dlrevive to ReVanced Manager (patch from URL)
+
+You can add dlrevive as a custom patch source — no manual APK building needed.
+
+1. Open **ReVanced Manager** → **Patches** tab.
+2. Tap the edit (pencil) button, then the **+** button.
+3. Choose **Enter URL** and paste:
+   ```
+   https://raw.githubusercontent.com/SchooiCodes/dlrevive/feat/manager-compatible-source/manager.json
+   ```
+4. Keep ReVanced Manager's **default patch source enabled**. Add this source alongside it —
+   Manager loads both together.
+5. Select a **YouTube Music 8.40.54** APK (the stock package; the GmsCore-support patch will
+   rename it to `app.revanced.android.apps.youtube.music`).
+6. In the patch list, enable:
+   - **GmsCore support** — from the official ReVanced Patches source. This is required: the patched
+     app needs **ReVanced GmsCore (microG)** installed on the device to launch and sign in.
+   - **Restore song downloads** — from the dlrevive source.
+   Keep the official default selection as-is unless you know what you are changing.
+7. Tap **Patch**, then install the patched APK through Manager.
+8. Tap a song's **Download** action: a `dlrevive: downloading ...` toast appears, the audio file is
+   saved under `Music/<folder>/` (default `dlrevive`), and the file can be opened in YTM's own
+   preview player from the settings screen's download list. Settings → About shows the dlrevive
+   version/status line, and Settings has a **dlrevive** section with enable, audio format,
+   download folder, and mobile-data toggles.
+
+**Note:** dlrevive saves public audio files that play in YTM's preview player and other players;
+they do **not** appear in YTM's own Offline tab (that needs Premium entitlement).
+
 ## Status
 
 Follow the [plan](docs/plan.md) for scope and milestones.
