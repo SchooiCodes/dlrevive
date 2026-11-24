@@ -157,34 +157,14 @@ val restoreSongDownloadsPatch = bytecodePatch(
             """.trimIndent(),
         )
 
-        // 5. Library entry point: add one tappable "dlrevive downloads" item to the Library
-        //    options menu that opens the Settings screen (which hosts our dlrevive section).
-        //    Verified target (8.40.54): Ljis; (LibraryBrowseFragment).onCreateOptionsMenu(Menu,MenuInflater)V,
-        //    PUBLIC FINAL, registers 4, ins 3, 20 code units; return-void is instruction index 8.
-        //    v1 = fragment (Context), v2 = Menu, v0 free scratch, outs 2 is enough.
-        val libraryClass = classDefs.firstOrNull { it.type == LIBRARY_BROWSE_CLASS }
-            ?: throw PatchException("library browse class $LIBRARY_BROWSE_CLASS not found")
-        val libraryMethod = classDefs.getOrReplaceMutable(libraryClass).methods.firstOrNull { method ->
-            method.name == "onCreateOptionsMenu" &&
-                method.returnType == "V" &&
-                method.parameters?.map { it.type } == listOf(
-                    "Landroid/view/Menu;",
-                    "Landroid/view/MenuInflater;",
-                )
-        } as? MutableMethod
-            ?: throw PatchException("$LIBRARY_BROWSE_CLASS;.onCreateOptionsMenu not found")
-
-        libraryMethod.addInstructions(
-            8,
-            """
-                invoke-static {v1, v2}, Ldev/dlrevive/integrations/LibraryEntry;->install(Landroid/content/Context;Landroid/view/Menu;)V
-            """.trimIndent(),
-        )
-
-        // 6. Visible Library entry: the menu item above is not user-visible on 8.40.54 (Library
-        //    root has no overflow button), so add a small tappable button to the Library toolbar.
+        // 5. Visible Library entry: add a small tappable button to the Library toolbar that opens
+        //    the Settings screen (which hosts our dlrevive section). The earlier menu-item hook
+        //    was removed: it passed the fragment as a Context and triggered a VerifyError that
+        //    crashed the app on entering Library (and the item was not visible anyway).
         //    Verified target: Ljis;.onViewCreated(View,Bundle)V, PUBLIC FINAL, registers 4, ins 3,
         //    outs 3; p1 (v2) is the root View at index 0 (before super, before v2 is overwritten).
+        val libraryClass = classDefs.firstOrNull { it.type == LIBRARY_BROWSE_CLASS }
+            ?: throw PatchException("library browse class $LIBRARY_BROWSE_CLASS not found")
         val libraryViewMethod = classDefs.getOrReplaceMutable(libraryClass).methods.firstOrNull { method ->
             method.name == "onViewCreated" &&
                 method.returnType == "V" &&

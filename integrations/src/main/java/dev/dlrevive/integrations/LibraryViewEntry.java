@@ -11,10 +11,11 @@ import android.widget.Button;
 /**
  * Adds a small, always-visible "dlrevive" button to the Library screen's toolbar.
  *
- * <p>The menu-item approach ({@link LibraryEntry}) was verified to fire but is not visible because
- * this YTM version's Library root has no overflow button. This view-level helper is the reliable
- * entry point. All View APIs used here are public framework APIs (android.jar); only the toolbar
- * resource id is version-specific and was verified from YTM 8.40.54 bytecode.</p>
+ * <p>The earlier menu-item approach was removed: it passed the fragment as a Context and caused a
+ * VerifyError that crashed the app on entering Library (and was not visible anyway). This view-level
+ * helper is the only Library entry point. All View APIs used here are public framework APIs
+ * (android.jar); only the toolbar resource id is version-specific and was verified from YTM 8.40.54
+ * bytecode.</p>
  */
 public final class LibraryViewEntry {
 
